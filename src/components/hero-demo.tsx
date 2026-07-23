@@ -7,14 +7,13 @@ import {
   ChevronDown,
   CircleCheck,
   ImageIcon,
-  LoaderCircle,
   MousePointer2,
   PackageCheck,
   Pause,
   Play,
+  RefreshCw,
   RotateCcw,
   Search,
-  ShieldCheck,
   ShoppingBag,
   Sparkles,
 } from "lucide-react";
@@ -34,9 +33,9 @@ const ebaySteps: SequenceStep[] = [
   { label: "Listing live", title: "Copy A is available", body: "The original listing is live with Copy A’s actual condition photographs.", duration: 1900 },
   { label: "Checkout", title: "A buyer completes checkout", body: "The purchase happens on the existing eBay listing.", duration: 1800 },
   { label: "Order confirmed", title: "The sale is recorded", body: "eBay confirms the order and the listing reaches quantity zero.", duration: 1500 },
-  { label: "Out of stock", title: "The listing pauses safely", body: "Buyers cannot purchase again while the queued copy is being applied.", duration: 1900 },
-  { label: "Updating", title: "Copy B replaces Copy A", body: "The new photographs and condition note are applied before quantity returns.", duration: 2100 },
-  { label: "Restocked", title: "Copy B is live on the same listing", body: "The item number, sold count, watchers, and listing history stay intact.", duration: 2800 },
+  { label: "Out of stock", title: "The listing pauses safely", body: "The sold count moves to nine while the listing waits at zero.", duration: 3000 },
+  { label: "Refresh", title: "The listing refreshes", body: "A normal page refresh reveals the queued copy—nothing theatrical required.", duration: 700 },
+  { label: "Restocked", title: "Copy B is live on the same listing", body: "The photos change, quantity returns to one, and the sold count stays at nine.", duration: 3000 },
 ];
 
 const nextinstockSteps: SequenceStep[] = [
@@ -70,17 +69,12 @@ function useLiveSequence(active: boolean, steps: SequenceStep[]) {
     setPlaying(true);
   }
 
-  function select(value: number) {
-    setPhase(value);
-    setPlaying(false);
-  }
-
   function restart() {
     setPhase(0);
     setPlaying(true);
   }
 
-  return { phase, playing, setPlaying, advance, select, restart };
+  return { phase, playing, setPlaying, advance, restart };
 }
 
 function EbayWordmark() {
@@ -99,8 +93,9 @@ function EbayListing({ phase, onAdvance }: { phase: number; onAdvance: () => voi
   const checkout = phase === 1;
   const confirmed = phase === 2;
   const sold = phase >= 3 && phase <= 4;
-  const updating = phase === 4;
+  const refreshing = phase === 4;
   const restocked = phase === 5;
+  const soldCount = phase >= 2 ? 9 : 8;
 
   return (
     <div className={`ebay-frame live-phase-${phase}`}>
@@ -125,13 +120,6 @@ function EbayListing({ phase, onAdvance }: { phase: number; onAdvance: () => voi
           </div>
           <div className="ebay-photo-live-wrap">
             <GamePhoto copy={restocked ? "next" : "current"} className="ebay-main-photo" />
-            {updating && (
-              <div className="ebay-photo-update">
-                <LoaderCircle size={20} />
-                <strong>Updating this listing</strong>
-                <span>Applying 6 photos from Copy B</span>
-              </div>
-            )}
           </div>
         </div>
         <div className="ebay-details">
@@ -145,8 +133,8 @@ function EbayListing({ phase, onAdvance }: { phase: number; onAdvance: () => voi
           <div className="ebay-condition"><span>Condition:</span><strong>Good</strong></div>
           <div className="ebay-quantity">
             <span>Quantity:</span>
-            <strong>{sold ? "Out of Stock" : "1 available"}</strong>
-            <small>8 sold</small>
+            <strong className={sold ? "is-out-of-stock" : undefined}>{sold ? "Out of stock" : "1 available"}</strong>
+            <small>{soldCount} sold</small>
           </div>
           {!sold && (
             <div className="ebay-buy-actions">
@@ -180,6 +168,7 @@ function EbayListing({ phase, onAdvance }: { phase: number; onAdvance: () => voi
 
       {phase === 3 && <div className="ebay-event-toast"><ShoppingBag size={16} /><span><strong>Sale detected</strong><small>Quantity changed from 1 to 0</small></span></div>}
       {restocked && <div className="ebay-restocked-toast"><CircleCheck size={16} /> Copy B is live on the original listing</div>}
+      {refreshing && <div className="ebay-page-refresh" aria-label="Refreshing the eBay listing"><RefreshCw size={24} /></div>}
     </div>
   );
 }
@@ -346,47 +335,38 @@ export function HeroScreenshot() {
   );
 }
 
-function SequenceControls({
+function ProcessStatus({
   steps,
   phase,
   playing,
-  onSelect,
   onToggle,
   onRestart,
 }: {
   steps: SequenceStep[];
   phase: number;
   playing: boolean;
-  onSelect: (value: number) => void;
   onToggle: () => void;
   onRestart: () => void;
 }) {
   const current = steps[phase];
   return (
-    <div className="process-narration">
-      <div className="process-narration-copy">
-        <span>Live sequence · {String(phase + 1).padStart(2, "0")} / {String(steps.length).padStart(2, "0")}</span>
+    <div className="process-status">
+      <span className="process-status-count">{String(phase + 1).padStart(2, "0")}<small>/{String(steps.length).padStart(2, "0")}</small></span>
+      <div className="process-status-copy">
         <strong>{current.title}</strong>
         <p>{current.body}</p>
       </div>
-      <div className="live-sequence-actions">
-        <button type="button" onClick={onToggle}>{playing ? <Pause size={13} /> : <Play size={13} />}{playing ? "Pause" : "Resume"}</button>
-        <button type="button" onClick={onRestart}><RotateCcw size={13} /> Replay</button>
+      <div className="process-status-actions">
+        <button type="button" onClick={onToggle} aria-label={playing ? "Pause process" : "Resume process"}>{playing ? <Pause size={17} /> : <Play size={17} />}</button>
+        <button type="button" onClick={onRestart} aria-label="Restart process"><RotateCcw size={17} /></button>
       </div>
-      <div className="live-sequence-track" aria-label="Live UI sequence steps">
-        {steps.map((item, index) => (
-          <button type="button" key={item.label} className={index === phase ? "active" : index < phase ? "complete" : ""} onClick={() => onSelect(index)} aria-label={`Show ${item.label}`}>
-            <span>{index < phase ? <Check size={9} /> : index + 1}</span><small>{item.label}</small>
-          </button>
-        ))}
-      </div>
-      <div className="process-progress" aria-hidden="true"><span style={{ width: `${((phase + 1) / steps.length) * 100}%` }} /></div>
+      <div className="process-status-progress" aria-hidden="true"><span style={{ width: `${((phase + 1) / steps.length) * 100}%` }} /></div>
     </div>
   );
 }
 
 export function ProcessLoop() {
-  const [activeTab, setActiveTab] = useState<StoryTab>("ebay");
+  const [activeTab, setActiveTab] = useState<StoryTab>("nextinstock");
   const ebay = useLiveSequence(activeTab === "ebay", ebaySteps);
   const nextinstock = useLiveSequence(activeTab === "nextinstock", nextinstockSteps);
   const activeSequence = activeTab === "ebay" ? ebay : nextinstock;
@@ -397,28 +377,27 @@ export function ProcessLoop() {
       <div className="process-browser-bar">
         <div className="browser-dots"><span /><span /><span /></div>
         <div className="process-tabs" role="tablist" aria-label="Live sale and restock interfaces">
-          <button type="button" role="tab" aria-selected={activeTab === "ebay"} className={activeTab === "ebay" ? "active" : ""} onClick={() => setActiveTab("ebay")}>
-            <EbayWordmark /> Listing
-          </button>
           <button type="button" role="tab" aria-selected={activeTab === "nextinstock"} className={activeTab === "nextinstock" ? "active" : ""} onClick={() => setActiveTab("nextinstock")}>
             <BrandMark compact /> Nextinstock
+          </button>
+          <button type="button" role="tab" aria-selected={activeTab === "ebay"} className={activeTab === "ebay" ? "active" : ""} onClick={() => setActiveTab("ebay")}>
+            <EbayWordmark /> Listing
           </button>
         </div>
         <span className="process-secure">● Live UI</span>
       </div>
 
-      <div className="process-screen" role="tabpanel">
-        {activeTab === "ebay" ? <EbayListing phase={ebay.phase} onAdvance={ebay.advance} /> : <NextinstockPanel phase={nextinstock.phase} onAdvance={nextinstock.advance} />}
-      </div>
-
-      <SequenceControls
+      <ProcessStatus
         steps={activeSteps}
         phase={activeSequence.phase}
         playing={activeSequence.playing}
-        onSelect={activeSequence.select}
         onToggle={() => activeSequence.setPlaying(!activeSequence.playing)}
         onRestart={activeSequence.restart}
       />
+
+      <div className="process-screen" role="tabpanel">
+        {activeTab === "ebay" ? <EbayListing phase={ebay.phase} onAdvance={ebay.advance} /> : <NextinstockPanel phase={nextinstock.phase} onAdvance={nextinstock.advance} />}
+      </div>
     </div>
   );
 }
