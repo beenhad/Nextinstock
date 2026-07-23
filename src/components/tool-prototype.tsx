@@ -106,7 +106,7 @@ export function ToolPrototype() {
         </nav>
         <div className="tool-account-card">
           <EbayBadge />
-          <span><strong>grailclub</strong><small><Check size={11} /> 164 listings synced</small></span>
+          <span><strong>nextinstock</strong><small><Check size={11} /> 164 listings synced</small></span>
         </div>
       </aside>
 
@@ -233,7 +233,7 @@ function TaskBuilder({
   return (
     <div className="builder-shell">
       <div className="builder-heading">
-        <div><button type="button" onClick={onClose}><ArrowLeft size={16} /> Restock tasks</button><h1>New restock task</h1><p>grailclub is connected and 164 eBay listings are synced.</p></div>
+        <div><button type="button" onClick={onClose}><ArrowLeft size={16} /> Restock tasks</button><h1>New restock task</h1><p>nextinstock is connected and 164 eBay listings are synced.</p></div>
         <button className="builder-close" type="button" onClick={onClose} aria-label="Close task setup"><X size={18} /></button>
       </div>
       <div className="builder-stepper" aria-label="Task setup progress">
@@ -357,7 +357,7 @@ function SettingsView() {
     <>
       <div className="tool-page-heading"><div><span>Workspace</span><h1>Settings</h1><p>Connected marketplace and default safety behavior.</p></div></div>
       <div className="settings-card">
-        <div><EbayBadge /><span><strong>grailclub</strong><small>Connected · 164 listings synced</small></span><button type="button">Manage connection</button></div>
+        <div><EbayBadge /><span><strong>nextinstock</strong><small>Connected · 164 listings synced</small></span><button type="button">Manage connection</button></div>
         <div><ShieldCheck size={21} /><span><strong>Safe-zero protection</strong><small>Keep listings unavailable until the next copy passes validation.</small></span><span className="settings-on">On</span></div>
       </div>
     </>

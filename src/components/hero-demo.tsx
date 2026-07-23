@@ -1,14 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   Check,
   ChevronDown,
   CircleCheck,
   ImageIcon,
+  LoaderCircle,
+  MousePointer2,
   PackageCheck,
+  Pause,
+  Play,
+  RotateCcw,
   Search,
+  ShieldCheck,
+  ShoppingBag,
   Sparkles,
 } from "lucide-react";
 import { BrandMark } from "./brand-mark";
@@ -16,57 +23,65 @@ import { GamePhoto } from "./game-photo";
 
 type StoryTab = "ebay" | "nextinstock";
 
-type StoryStep = {
-  tab: StoryTab;
+type SequenceStep = {
   label: string;
   title: string;
   body: string;
+  duration: number;
 };
 
-const storySteps: StoryStep[] = [
-  {
-    tab: "ebay",
-    label: "Listing live",
-    title: "Copy A is for sale",
-    body: "The listing keeps its sales history, watchers, price, and item specifics.",
-  },
-  {
-    tab: "nextinstock",
-    label: "Select listing",
-    title: "Choose the synced listing",
-    body: "The eBay account is already connected. Pick the replenishable listing once.",
-  },
-  {
-    tab: "nextinstock",
-    label: "Queue copy",
-    title: "Add the next copy",
-    body: "Photograph its actual condition and place it first in the restock queue.",
-  },
-  {
-    tab: "nextinstock",
-    label: "Activate",
-    title: "Set the handoff rule",
-    body: "After a sale reaches zero, swap the photos and restore quantity to one.",
-  },
-  {
-    tab: "ebay",
-    label: "Sale",
-    title: "Copy A sells",
-    body: "The listing pauses at zero while Nextinstock prepares the queued copy.",
-  },
-  {
-    tab: "nextinstock",
-    label: "Restock",
-    title: "Nextinstock applies Copy B",
-    body: "The queued photographs and condition note replace the sold copy.",
-  },
-  {
-    tab: "ebay",
-    label: "Live again",
-    title: "The same listing returns",
-    body: "Copy B is live with the correct photograph. The listing itself never starts over.",
-  },
+const ebaySteps: SequenceStep[] = [
+  { label: "Listing live", title: "Copy A is available", body: "The original listing is live with Copy A’s actual condition photographs.", duration: 1900 },
+  { label: "Checkout", title: "A buyer completes checkout", body: "The purchase happens on the existing eBay listing.", duration: 1800 },
+  { label: "Order confirmed", title: "The sale is recorded", body: "eBay confirms the order and the listing reaches quantity zero.", duration: 1500 },
+  { label: "Out of stock", title: "The listing pauses safely", body: "Buyers cannot purchase again while the queued copy is being applied.", duration: 1900 },
+  { label: "Updating", title: "Copy B replaces Copy A", body: "The new photographs and condition note are applied before quantity returns.", duration: 2100 },
+  { label: "Restocked", title: "Copy B is live on the same listing", body: "The item number, sold count, watchers, and listing history stay intact.", duration: 2800 },
 ];
+
+const nextinstockSteps: SequenceStep[] = [
+  { label: "Tasks", title: "Start a restock task", body: "The eBay account is already connected and its listings are synced.", duration: 1700 },
+  { label: "Listing", title: "Select the listing once", body: "Choose the replenishable listing that should keep its history.", duration: 1900 },
+  { label: "Next copy", title: "Queue Copy B’s real condition", body: "Photos enter the queue and the copy-specific condition note is completed.", duration: 2300 },
+  { label: "Automation", title: "Set the safe handoff rule", body: "After a sale reaches zero, apply the queued copy and restore quantity to one.", duration: 2200 },
+  { label: "Review", title: "Activate the task", body: "The listing, next copy, and safe-zero rule are checked together.", duration: 1900 },
+  { label: "Sale detected", title: "The queued copy is applied", body: "Quantity stays at zero while the photo and condition update runs.", duration: 2300 },
+  { label: "Complete", title: "Copy B is ready for the next buyer", body: "The task returns to active and waits for another copy to be queued.", duration: 2800 },
+];
+
+function useLiveSequence(active: boolean, steps: SequenceStep[]) {
+  const [phase, setPhase] = useState(0);
+  const [playing, setPlaying] = useState(true);
+
+  useEffect(() => {
+    if (!active || !playing) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reducedMotion) return;
+
+    const timer = window.setTimeout(() => {
+      setPhase((value) => (value + 1) % steps.length);
+    }, steps[phase].duration);
+
+    return () => window.clearTimeout(timer);
+  }, [active, phase, playing, steps]);
+
+  function advance() {
+    setPhase((value) => (value + 1) % steps.length);
+    setPlaying(true);
+  }
+
+  function select(value: number) {
+    setPhase(value);
+    setPlaying(false);
+  }
+
+  function restart() {
+    setPhase(0);
+    setPlaying(true);
+  }
+
+  return { phase, playing, setPlaying, advance, select, restart };
+}
 
 function EbayWordmark() {
   return (
@@ -76,12 +91,19 @@ function EbayWordmark() {
   );
 }
 
-function EbayListing({ step }: { step: number }) {
-  const sold = step === 4;
-  const restocked = step === 6;
+function LiveCursor({ className = "" }: { className?: string }) {
+  return <span className={`live-cursor ${className}`} aria-hidden="true"><MousePointer2 size={18} fill="white" /></span>;
+}
+
+function EbayListing({ phase, onAdvance }: { phase: number; onAdvance: () => void }) {
+  const checkout = phase === 1;
+  const confirmed = phase === 2;
+  const sold = phase >= 3 && phase <= 4;
+  const updating = phase === 4;
+  const restocked = phase === 5;
 
   return (
-    <div className="ebay-frame">
+    <div className={`ebay-frame live-phase-${phase}`}>
       <div className="ebay-utility">
         <span>Hi! <u>Sign in</u> or <u>register</u></span>
         <span className="ebay-utility-links">Deals&nbsp;&nbsp; Help &amp; Contact&nbsp;&nbsp;&nbsp; Sell&nbsp;&nbsp; Watchlist&nbsp;&nbsp; My eBay</span>
@@ -101,13 +123,22 @@ function EbayListing({ step }: { step: number }) {
             <GamePhoto copy={restocked ? "next" : "current"} />
             <GamePhoto copy={restocked ? "current" : "next"} />
           </div>
-          <GamePhoto copy={restocked ? "next" : "current"} className="ebay-main-photo" />
+          <div className="ebay-photo-live-wrap">
+            <GamePhoto copy={restocked ? "next" : "current"} className="ebay-main-photo" />
+            {updating && (
+              <div className="ebay-photo-update">
+                <LoaderCircle size={20} />
+                <strong>Updating this listing</strong>
+                <span>Applying 6 photos from Copy B</span>
+              </div>
+            )}
+          </div>
         </div>
         <div className="ebay-details">
           <h3>Pokemon XD: Gale of Darkness (Nintendo GameCube, 2005) Japanese Complete Tested</h3>
           <div className="ebay-seller">
-            <span className="ebay-avatar">g</span>
-            <span><strong>grailclub</strong> (2891)<br /><u>100% positive</u> · <u>Seller&apos;s other items</u></span>
+            <span className="ebay-avatar">n</span>
+            <span><strong>nextinstock</strong> (2891)<br /><u>100% positive</u> · <u>Seller&apos;s other items</u></span>
           </div>
           <div className="ebay-price">US $84.99</div>
           <p className="ebay-payments">or 4 interest-free payments of $21.25 available with <strong>Klarna.</strong></p>
@@ -117,9 +148,37 @@ function EbayListing({ step }: { step: number }) {
             <strong>{sold ? "Out of Stock" : "1 available"}</strong>
             <small>8 sold</small>
           </div>
-          <button type="button" className="ebay-watch">♡ Add to watchlist</button>
+          {!sold && (
+            <div className="ebay-buy-actions">
+              <button type="button" className="ebay-buy-now" onClick={onAdvance}>Buy It Now</button>
+              <button type="button" className="ebay-watch">♡ Add to watchlist</button>
+              {phase === 0 && <LiveCursor className="cursor-buy" />}
+            </div>
+          )}
         </div>
       </div>
+
+      {checkout && (
+        <div className="ebay-checkout-scrim">
+          <div className="ebay-checkout-sheet">
+            <span className="checkout-kicker">Review order</span>
+            <div className="checkout-item"><GamePhoto copy="current" /><span><strong>Pokemon XD: Gale of Darkness</strong><small>Good · Quantity 1</small></span><strong>$84.99</strong></div>
+            <div className="checkout-total"><span>Order total</span><strong>US $84.99</strong></div>
+            <button type="button" onClick={onAdvance}>Confirm and pay</button>
+            <LiveCursor className="cursor-confirm" />
+          </div>
+        </div>
+      )}
+
+      {confirmed && (
+        <div className="ebay-order-confirmed">
+          <span><CircleCheck size={23} /></span>
+          <strong>Your order is confirmed</strong>
+          <small>Order 19-08421-55394 · Seller notified</small>
+        </div>
+      )}
+
+      {phase === 3 && <div className="ebay-event-toast"><ShoppingBag size={16} /><span><strong>Sale detected</strong><small>Quantity changed from 1 to 0</small></span></div>}
       {restocked && <div className="ebay-restocked-toast"><CircleCheck size={16} /> Copy B is live on the original listing</div>}
     </div>
   );
@@ -139,14 +198,9 @@ function ListingRow({ selected = false }: { selected?: boolean }) {
   );
 }
 
-function NextinstockPanel({ step }: { step: number }) {
-  const selectStage = step === 1;
-  const photoStage = step === 2;
-  const ruleStage = step === 3;
-  const applyingStage = step === 5;
-
+function NextinstockPanel({ phase, onAdvance }: { phase: number; onAdvance: () => void }) {
   return (
-    <div className="next-frame">
+    <div className={`next-frame next-live-phase-${phase}`}>
       <aside className="next-mini-sidebar">
         <BrandMark compact />
         <span className="next-mini-nav active">⌁</span>
@@ -156,75 +210,106 @@ function NextinstockPanel({ step }: { step: number }) {
       <div className="next-story-main">
         <div className="next-story-topbar">
           <div>
-            <strong>{applyingStage ? "Restocking listing" : "New restock task"}</strong>
-            <span>grailclub · eBay synced</span>
+            <strong>{phase === 0 || phase >= 5 ? "Restock tasks" : "New restock task"}</strong>
+            <span>nextinstock · eBay synced</span>
           </div>
           <span className="synced-pill"><Check size={12} /> Synced</span>
         </div>
 
-        {selectStage && (
-          <div className="story-stage-body">
-            <div className="story-step-kicker">1 of 3 · Listing</div>
-            <h3>Select a replenishable listing</h3>
-            <div className="story-search"><Search size={15} /> Search 164 synced listings</div>
-            <ListingRow selected />
-            <div className="story-action"><button type="button">Continue <ArrowRight size={14} /></button></div>
-          </div>
-        )}
+        <div className="next-live-canvas">
+          {phase === 0 && (
+            <div className="next-live-dashboard">
+              <div className="next-live-heading"><div><span>Inventory automation</span><h3>Restock tasks</h3></div><button type="button" onClick={onAdvance}><span>+</span> New restock task</button></div>
+              <div className="next-live-stats"><span><small>Active tasks</small><strong>3</strong></span><span><small>Next copies ready</small><strong>6</strong></span><span><small>Restocked this month</small><strong>18</strong></span></div>
+              <div className="next-live-table"><div className="next-live-table-head"><span>Listing</span><span>Next copy</span><span>Status</span></div><ListingRow /></div>
+              <LiveCursor className="cursor-new-task" />
+            </div>
+          )}
 
-        {photoStage && (
-          <div className="story-stage-body">
-            <div className="story-step-kicker">2 of 3 · Next copy</div>
-            <h3>Add the copy that sells next</h3>
-            <div className="story-photo-form">
-              <div className="story-current-copy">
-                <span>Currently live</span>
-                <GamePhoto copy="current" />
-                <small>Copy A</small>
+          {phase === 1 && (
+            <div className="story-stage-body live-panel-enter">
+              <div className="story-step-kicker">1 of 4 · Listing</div>
+              <h3>Select a replenishable listing</h3>
+              <div className="story-search"><Search size={15} /> Search 164 synced listings</div>
+              <ListingRow selected />
+              <div className="story-action"><button type="button" onClick={onAdvance}>Continue <ArrowRight size={14} /></button></div>
+              <LiveCursor className="cursor-listing-continue" />
+            </div>
+          )}
+
+          {phase === 2 && (
+            <div className="story-stage-body live-panel-enter">
+              <div className="story-step-kicker">2 of 4 · Next copy</div>
+              <h3>Add the copy that sells next</h3>
+              <div className="live-copy-editor">
+                <div className="live-upload-grid">
+                  <GamePhoto copy="next" /><GamePhoto copy="current" /><GamePhoto copy="next" /><GamePhoto copy="current" />
+                  <span className="live-upload-count"><Check size={12} /> 6 photos uploaded</span>
+                </div>
+                <div className="live-copy-fields">
+                  <label><span>Internal reference</span><input readOnly value="GC-PKXD-009" /></label>
+                  <label><span>Condition</span><button type="button">Good <ChevronDown size={13} /></button></label>
+                  <label><span>Condition note</span><textarea readOnly value="Clean case, manual included. Light shelf wear shown." /></label>
+                </div>
               </div>
-              <ArrowRight size={18} />
-              <div className="story-current-copy story-next-copy">
-                <span>First in queue</span>
-                <GamePhoto copy="next" />
-                <small><Check size={12} /> 6 photos · Good</small>
+              <div className="story-action"><button type="button" onClick={onAdvance}>Continue <ArrowRight size={14} /></button></div>
+              <LiveCursor className="cursor-copy-continue" />
+            </div>
+          )}
+
+          {phase === 3 && (
+            <div className="story-stage-body live-panel-enter">
+              <div className="story-step-kicker">3 of 4 · Automation</div>
+              <h3>Set the sale-to-restock handoff</h3>
+              <div className="story-rule">
+                <div><span>WHEN</span><PackageCheck size={18} /><strong>Quantity reaches 0 after a sale</strong></div>
+                <ArrowRight size={18} />
+                <div><span>THEN</span><ImageIcon size={18} /><strong>Apply next photos and set quantity to 1</strong></div>
               </div>
-              <div className="story-note-field">
-                <span>Condition note</span>
-                <strong>Clean case, manual included. Light shelf wear shown.</strong>
+              <label className="story-safety"><span><Check size={12} /></span> Keep quantity at zero if the queued copy is incomplete</label>
+              <div className="story-action"><button type="button" onClick={onAdvance}>Review task <ArrowRight size={14} /></button></div>
+              <LiveCursor className="cursor-rule-continue" />
+            </div>
+          )}
+
+          {phase === 4 && (
+            <div className="story-stage-body live-panel-enter">
+              <div className="story-step-kicker">4 of 4 · Review</div>
+              <h3>Activate the restock task</h3>
+              <div className="live-review-handoff">
+                <div><span>eBay listing</span><GamePhoto copy="current" /><strong>Item 266994813467</strong></div>
+                <ArrowRight size={19} />
+                <div><span>First in queue</span><GamePhoto copy="next" /><strong>GC-PKXD-009</strong></div>
+              </div>
+              <div className="live-review-checks"><span><Check size={12} /> Listing selected</span><span><Check size={12} /> Copy complete</span><span><Check size={12} /> Safe-zero enabled</span></div>
+              <div className="story-action"><button type="button" onClick={onAdvance}>Activate restock task <Sparkles size={14} /></button></div>
+              <LiveCursor className="cursor-activate" />
+            </div>
+          )}
+
+          {phase === 5 && (
+            <div className="story-stage-body story-applying-body live-panel-enter">
+              <div className="apply-ring" />
+              <div>
+                <div className="story-step-kicker">Sale detected · 10:42:08 AM</div>
+                <h3>Applying Copy B to item 266994813467</h3>
+                <div className="apply-checks">
+                  <span><Check size={13} /> Quantity held at zero</span>
+                  <span><Check size={13} /> 6 photos verified</span>
+                  <span className="is-working"><span /> Updating eBay listing</span>
+                </div>
               </div>
             </div>
-            <div className="story-action"><button type="button">Continue <ArrowRight size={14} /></button></div>
-          </div>
-        )}
+          )}
 
-        {ruleStage && (
-          <div className="story-stage-body">
-            <div className="story-step-kicker">3 of 3 · Automation</div>
-            <h3>Choose what happens after the sale</h3>
-            <div className="story-rule">
-              <div><span>WHEN</span><PackageCheck size={18} /><strong>Quantity reaches 0 after a sale</strong></div>
-              <ArrowRight size={18} />
-              <div><span>THEN</span><ImageIcon size={18} /><strong>Apply next photos and set quantity to 1</strong></div>
+          {phase === 6 && (
+            <div className="next-success-state live-panel-enter">
+              <span className="next-success-icon"><CircleCheck size={25} /></span>
+              <div><span>Restock complete · 10:42:11 AM</span><h3>Copy B is live on eBay</h3><p>Photos and condition updated. Quantity restored to one.</p></div>
+              <div className="next-success-task"><GamePhoto copy="next" /><span><strong>Pokemon XD: Gale of Darkness</strong><small>Item 266994813467 · Copy B</small></span><span className="ready-pill"><Check size={11} /> Active</span></div>
             </div>
-            <label className="story-safety"><span><Check size={12} /></span> Keep quantity at zero if the queued copy is incomplete</label>
-            <div className="story-action"><button type="button">Activate restock task <Sparkles size={14} /></button></div>
-          </div>
-        )}
-
-        {applyingStage && (
-          <div className="story-stage-body story-applying-body">
-            <div className="apply-ring"><span /></div>
-            <div>
-              <div className="story-step-kicker">Sale detected · 10:42:08 AM</div>
-              <h3>Applying Copy B to item 266994813467</h3>
-              <div className="apply-checks">
-                <span><Check size={13} /> Quantity held at zero</span>
-                <span><Check size={13} /> 6 photos verified</span>
-                <span className="is-working"><span /> Updating eBay listing</span>
-              </div>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
@@ -235,7 +320,7 @@ export function HeroScreenshot() {
     <div className="hero-shot-shell" aria-label="Nextinstock restock task overview">
       <div className="hero-shot-bar">
         <BrandMark />
-        <div className="hero-shot-user">GC</div>
+        <div className="hero-shot-user">NI</div>
       </div>
       <div className="hero-shot-content">
         <div className="hero-shot-heading">
@@ -261,79 +346,79 @@ export function HeroScreenshot() {
   );
 }
 
+function SequenceControls({
+  steps,
+  phase,
+  playing,
+  onSelect,
+  onToggle,
+  onRestart,
+}: {
+  steps: SequenceStep[];
+  phase: number;
+  playing: boolean;
+  onSelect: (value: number) => void;
+  onToggle: () => void;
+  onRestart: () => void;
+}) {
+  const current = steps[phase];
+  return (
+    <div className="process-narration">
+      <div className="process-narration-copy">
+        <span>Live sequence · {String(phase + 1).padStart(2, "0")} / {String(steps.length).padStart(2, "0")}</span>
+        <strong>{current.title}</strong>
+        <p>{current.body}</p>
+      </div>
+      <div className="live-sequence-actions">
+        <button type="button" onClick={onToggle}>{playing ? <Pause size={13} /> : <Play size={13} />}{playing ? "Pause" : "Resume"}</button>
+        <button type="button" onClick={onRestart}><RotateCcw size={13} /> Replay</button>
+      </div>
+      <div className="live-sequence-track" aria-label="Live UI sequence steps">
+        {steps.map((item, index) => (
+          <button type="button" key={item.label} className={index === phase ? "active" : index < phase ? "complete" : ""} onClick={() => onSelect(index)} aria-label={`Show ${item.label}`}>
+            <span>{index < phase ? <Check size={9} /> : index + 1}</span><small>{item.label}</small>
+          </button>
+        ))}
+      </div>
+      <div className="process-progress" aria-hidden="true"><span style={{ width: `${((phase + 1) / steps.length) * 100}%` }} /></div>
+    </div>
+  );
+}
+
 export function ProcessLoop() {
-  const [step, setStep] = useState(0);
-  const [manualTab, setManualTab] = useState<StoryTab | null>(null);
-  const current = storySteps[step];
-  const visibleTab = manualTab ?? current.tab;
-
-  useEffect(() => {
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced || manualTab) return;
-    const timer = window.setTimeout(() => setStep((value) => (value + 1) % storySteps.length), 3000);
-    return () => window.clearTimeout(timer);
-  }, [step, manualTab]);
-
-  useEffect(() => {
-    if (!manualTab) return;
-    const timer = window.setTimeout(() => setManualTab(null), 5000);
-    return () => window.clearTimeout(timer);
-  }, [manualTab]);
-
-  const stepProgress = useMemo(() => `${((step + 1) / storySteps.length) * 100}%`, [step]);
+  const [activeTab, setActiveTab] = useState<StoryTab>("ebay");
+  const ebay = useLiveSequence(activeTab === "ebay", ebaySteps);
+  const nextinstock = useLiveSequence(activeTab === "nextinstock", nextinstockSteps);
+  const activeSequence = activeTab === "ebay" ? ebay : nextinstock;
+  const activeSteps = activeTab === "ebay" ? ebaySteps : nextinstockSteps;
 
   return (
     <div className="process-loop">
       <div className="process-browser-bar">
         <div className="browser-dots"><span /><span /><span /></div>
-        <div className="process-tabs" role="tablist" aria-label="Sale to restock views">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={visibleTab === "ebay"}
-            className={visibleTab === "ebay" ? "active" : ""}
-            onClick={() => setManualTab("ebay")}
-          >
+        <div className="process-tabs" role="tablist" aria-label="Live sale and restock interfaces">
+          <button type="button" role="tab" aria-selected={activeTab === "ebay"} className={activeTab === "ebay" ? "active" : ""} onClick={() => setActiveTab("ebay")}>
             <EbayWordmark /> Listing
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={visibleTab === "nextinstock"}
-            className={visibleTab === "nextinstock" ? "active" : ""}
-            onClick={() => setManualTab("nextinstock")}
-          >
+          <button type="button" role="tab" aria-selected={activeTab === "nextinstock"} className={activeTab === "nextinstock" ? "active" : ""} onClick={() => setActiveTab("nextinstock")}>
             <BrandMark compact /> Nextinstock
           </button>
         </div>
-        <span className="process-secure">● Connected</span>
+        <span className="process-secure">● Live UI</span>
       </div>
 
-      <div className="process-screen">
-        {visibleTab === "ebay" ? <EbayListing step={step} /> : <NextinstockPanel step={step < 1 || step > 5 ? 1 : step} />}
+      <div className="process-screen" role="tabpanel">
+        {activeTab === "ebay" ? <EbayListing phase={ebay.phase} onAdvance={ebay.advance} /> : <NextinstockPanel phase={nextinstock.phase} onAdvance={nextinstock.advance} />}
       </div>
 
-      <div className="process-narration">
-        <div className="process-narration-copy">
-          <span>{String(step + 1).padStart(2, "0")} / {String(storySteps.length).padStart(2, "0")} · {current.label}</span>
-          <strong>{current.title}</strong>
-          <p>{current.body}</p>
-        </div>
-        <div className="process-step-buttons" aria-label="Process steps">
-          {storySteps.map((item, index) => (
-            <button
-              type="button"
-              key={`${item.label}-${index}`}
-              className={index === step ? "active" : ""}
-              onClick={() => { setManualTab(null); setStep(index); }}
-              aria-label={`Show step ${index + 1}: ${item.label}`}
-            >
-              <span />
-            </button>
-          ))}
-        </div>
-        <div className="process-progress" aria-hidden="true"><span style={{ width: stepProgress }} /></div>
-      </div>
+      <SequenceControls
+        steps={activeSteps}
+        phase={activeSequence.phase}
+        playing={activeSequence.playing}
+        onSelect={activeSequence.select}
+        onToggle={() => activeSequence.setPlaying(!activeSequence.playing)}
+        onRestart={activeSequence.restart}
+      />
     </div>
   );
 }
