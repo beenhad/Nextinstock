@@ -1,9 +1,8 @@
 import Link from "next/link";
 import {
-  ArrowDown,
   ArrowRight,
   Check,
-  CirclePause,
+  Clock3,
   ImageIcon,
   PackageCheck,
   ShieldCheck,
@@ -20,28 +19,24 @@ export default function HomePage() {
       <section className="hero-section">
         <div className="site-container hero-grid">
           <div className="hero-copy">
-            <span className="hero-kicker"><span /> Restock automation for preowned inventory</span>
-            <h1>Keep the listing.<br />Change the <em>copy.</em></h1>
+            <span className="hero-kicker">Built for repeat preowned inventory</span>
+            <h1>Keep the listing.<br />Change the copy.</h1>
             <p className="hero-lede">
-              Queue the actual photos of your next preowned game. When the current one sells, Nextinstock safely restocks the same eBay listing with the right condition shown.
+              Queue the actual photos of the next game. When today&apos;s copy sells,
+              Nextinstock updates the same eBay listing with the correct condition
+              before quantity returns to one.
             </p>
             <div className="hero-actions">
-              <a className="primary-link" href="#handoff">
-                See the handoff <ArrowDown size={15} />
-              </a>
-              <Link className="text-link" href="/tool">
-                Open the tool <ArrowRight size={15} />
-              </Link>
+              <Link className="primary-link" href="/tool">Open the tool</Link>
+              <a className="text-link" href="#handoff">See the handoff <ArrowRight size={16} /></a>
             </div>
             <div className="hero-proof-line">
-              <span><Check size={13} /> One listing</span>
-              <span><Check size={13} /> Copy-specific photos</span>
-              <span><Check size={13} /> Safe at zero</span>
+              <span><Check size={14} /> One item number</span>
+              <span><Check size={14} /> Copy-specific photos</span>
+              <span><Check size={14} /> Safe at zero</span>
             </div>
           </div>
           <div className="hero-visual-wrap">
-            <div className="hero-orbit hero-orbit-one" />
-            <div className="hero-orbit hero-orbit-two" />
             <HeroScreenshot />
             <div className="hero-float-note">
               <span className="hero-float-icon"><Check size={13} /></span>
@@ -56,10 +51,11 @@ export default function HomePage() {
           <div className="compact-section-heading">
             <div>
               <span className="section-kicker">From sold to live again</span>
-              <h2>Watch the listing hand off to the next copy.</h2>
+              <h2>The complete handoff, in the interfaces that do it.</h2>
             </div>
             <p>
-              The account is already connected and listings are synced. This is the complete setup and restock sequence.
+              Switch between the Nextinstock task and the eBay listing. Both are live,
+              clickable sequences—not a prerecorded video.
             </p>
           </div>
           <ProcessLoop />
@@ -69,24 +65,25 @@ export default function HomePage() {
       <section className="compact-value-section" id="built-for">
         <div className="site-container compact-value-grid">
           <div className="compact-value-intro">
-            <span className="section-kicker">Built for repeat inventory</span>
-            <h2>The listing repeats.<br />The condition doesn&apos;t.</h2>
+            <span className="section-kicker">Why resellers use it</span>
+            <h2>The listing repeats.<br />The condition never does.</h2>
             <p>
-              For resellers with enough copies of the same game to replenish one listing—without pretending every used copy looks identical.
+              Keep the history attached to a replenishable listing without showing
+              buyers photos from a different physical copy.
             </p>
           </div>
           <div className="compact-benefits">
             <article>
               <span><ImageIcon size={18} /></span>
-              <div><strong>Photograph ahead</strong><p>Prepare the next physical copy while today&apos;s copy is still live.</p></div>
+              <div><strong>Photograph ahead</strong><p>Prepare the next physical copy while the current one is still live.</p></div>
             </article>
             <article>
               <span><PackageCheck size={18} /></span>
-              <div><strong>Restock after sale</strong><p>Reuse the same item number, watchers, and listing history.</p></div>
+              <div><strong>Keep the listing</strong><p>Reuse the same item number, watchers, and sales history.</p></div>
             </article>
             <article>
-              <span><CirclePause size={18} /></span>
-              <div><strong>Fail safely</strong><p>If the queued copy is incomplete, quantity stays at zero.</p></div>
+              <span><Clock3 size={18} /></span>
+              <div><strong>Skip the stop-start</strong><p>Queue condition work in batches instead of returning after every sale.</p></div>
             </article>
           </div>
         </div>
@@ -96,12 +93,10 @@ export default function HomePage() {
         <div className="site-container compact-cta-inner">
           <div className="compact-cta-shield"><ShieldCheck size={23} /></div>
           <div>
-            <span>One queue per condition tier</span>
-            <strong>Complete, disc-only, and regional variants stay separate.</strong>
+            <span>Safe-zero protection</span>
+            <strong>If the next copy is incomplete, the listing stays unavailable.</strong>
           </div>
-          <Link className="primary-link primary-link-light" href="/tool">
-            Open Nextinstock <ArrowRight size={15} />
-          </Link>
+          <Link className="primary-link primary-link-light" href="/tool">Open Nextinstock</Link>
         </div>
       </section>
 
@@ -109,7 +104,7 @@ export default function HomePage() {
         <div className="site-container footer-inner">
           <BrandMark />
           <p>Condition-aware restocking for preowned inventory.</p>
-          <span>Designed for game resellers.</span>
+          <span>Independent software for eBay game sellers.</span>
         </div>
       </footer>
     </main>
