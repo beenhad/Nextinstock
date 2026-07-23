@@ -14,9 +14,9 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nextinstock — Queue the next copy",
+  title: "Nextinstock — Keep the listing. Change the copy.",
   description:
-    "Queue condition photos for replenishable preowned game listings and keep the right copy in stock.",
+    "Queue copy-specific photos for replenishable preowned game listings and restock the same eBay listing safely.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

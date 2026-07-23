@@ -10,11 +10,11 @@ export function SiteHeader() {
           <BrandMark />
         </Link>
         <nav className="desktop-nav" aria-label="Main navigation">
-          <a href="#how-it-works">How it works</a>
+          <a href="#handoff">How it works</a>
           <a href="#built-for">Who it&apos;s for</a>
         </nav>
         <Link className="header-tool-link" href="/tool">
-          Open the tool <ArrowUpRight size={15} />
+          Open tool <ArrowUpRight size={15} />
         </Link>
       </div>
     </header>

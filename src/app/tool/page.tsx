@@ -3,7 +3,7 @@ import { ToolPrototype } from "@/components/tool-prototype";
 
 export const metadata: Metadata = {
   title: "Restock queue — Nextinstock",
-  description: "Explore the Nextinstock restock queue prototype.",
+  description: "Set up and manage copy-specific restock tasks for synced eBay listings.",
 };
 
 export default function ToolPage() {
