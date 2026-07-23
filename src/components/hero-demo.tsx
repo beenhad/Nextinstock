@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react";
 import {
+  Activity,
   ArrowRight,
   Check,
   ChevronDown,
   CircleCheck,
   ImageIcon,
+  LayoutList,
   MousePointer2,
   PackageCheck,
   Pause,
@@ -14,6 +16,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Settings,
   ShoppingBag,
   Sparkles,
 } from "lucide-react";
@@ -192,9 +195,9 @@ function NextinstockPanel({ phase, onAdvance }: { phase: number; onAdvance: () =
     <div className={`next-frame next-live-phase-${phase}`}>
       <aside className="next-mini-sidebar">
         <BrandMark compact />
-        <span className="next-mini-nav active">⌁</span>
-        <span className="next-mini-nav">□</span>
-        <span className="next-mini-nav">⚙</span>
+        <span className="next-mini-nav active"><LayoutList size={16} /></span>
+        <span className="next-mini-nav"><Activity size={16} /></span>
+        <span className="next-mini-nav"><Settings size={16} /></span>
       </aside>
       <div className="next-story-main">
         <div className="next-story-topbar">
@@ -210,7 +213,7 @@ function NextinstockPanel({ phase, onAdvance }: { phase: number; onAdvance: () =
             <div className="next-live-dashboard">
               <div className="next-live-heading"><div><span>Inventory automation</span><h3>Restock tasks</h3></div><button type="button" onClick={onAdvance}><span>+</span> New restock task</button></div>
               <div className="next-live-stats"><span><small>Active tasks</small><strong>3</strong></span><span><small>Next copies ready</small><strong>6</strong></span><span><small>Restocked this month</small><strong>18</strong></span></div>
-              <div className="next-live-table"><div className="next-live-table-head"><span>Listing</span><span>Next copy</span><span>Status</span></div><ListingRow /></div>
+              <div className="next-live-table"><div className="next-live-table-head"><span>Listing</span><span>Price</span><span>Status</span></div><ListingRow /></div>
               <LiveCursor className="cursor-new-task" />
             </div>
           )}
