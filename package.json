@@ -3,22 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "worker": "tsx scripts/restock-worker.ts",
+    "worker:once": "tsx scripts/restock-worker.ts --once"
   },
   "dependencies": {
     "@ebay/skin": "^19.29.0",
+    "dotenv": "^17.4.2",
     "lucide-react": "1.25.0",
     "next": "16.2.11",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "sharp": "0.35.3"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "tsx": "^4.23.1",
     "typescript": "5.9.3"
   },
   "overrides": {
