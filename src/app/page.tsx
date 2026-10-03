@@ -9,7 +9,6 @@ import { HeroScreenshot } from "@/components/hero-demo";
 import { SiteHeader } from "@/components/site-header";
 import { PurchaseButton } from "@/components/purchase-button";
 import { OfferMeter } from "@/components/offer-meter";
-import { RepeatStockShowcase } from "@/components/repeat-stock-showcase";
 import { checkoutMode, desktopOfferStatus } from "@/lib/server/stripe";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +17,18 @@ const useCases = [
   { category: "PREOWNED GAMES", title: "Keep the item number.", detail: "Prepare each copy with its own photos, condition note, and price before the current one sells." },
   { category: "CARDS & COLLECTIBLES", title: "Queue limited stock.", detail: "Line up the next physical copy while the listing is still active." },
   { category: "VARIATION LISTINGS", title: "Restock one option.", detail: "Target its quantity and optional price while the listing's shared photos stay in place." },
+];
+
+const howItWorks = [
+  { title: "Choose a listing", detail: "Pick the eBay listing you want to keep." },
+  { title: "Prepare the next copy", detail: "Add its photos, condition, and price ahead of time." },
+  { title: "Restock after a sale", detail: "Next updates the same listing when the current copy sells." },
+];
+
+const sellerStories = [
+  { quote: "I don't want to rebuild a listing every time a game sells. If the next copy is already photographed, I want it waiting there.", initials: "GC", name: "GrailClub", role: "Game and collectibles store" },
+  { quote: "The worst time to photograph the next card is right after somebody buys the last one.", initials: "TC", name: "Trading card seller", role: "Seller scenario" },
+  { quote: "I've got more copies in the back, but that doesn't mean I want all of them listed at yesterday's price.", initials: "GS", name: "Game store owner", role: "Seller scenario" },
 ];
 
 const faqs = [
@@ -78,10 +89,14 @@ export default function HomePage() {
         <div className="site-container">
           <div className="compact-value-intro">
             <span className="section-kicker">How it works</span>
-            <h2>From sold to restocked.</h2>
-            <p>Pick the listing, prep what sells next, and let Next handle the handoff.</p>
+            <h2>Three steps. Same listing.</h2>
           </div>
-          <RepeatStockShowcase />
+          <ol className="how-steps">
+            {howItWorks.map((step, index) => <li key={step.title}>
+              <span className="how-step-number">0{index + 1}</span>
+              <div><h3>{step.title}</h3><p>{step.detail}</p></div>
+            </li>)}
+          </ol>
         </div>
       </section>
 
@@ -101,16 +116,25 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="seller-voice-section" id="seller-story">
-        <div className="site-container seller-voice-grid">
-          <div>
-            <span className="section-kicker">From the seller&apos;s side</span>
-            <h2>A seller&apos;s take.</h2>
+      <section className="seller-stories-section" id="seller-story">
+        <div className="site-container">
+          <div className="seller-stories-heading">
+            <div>
+              <span className="section-kicker">Seller perspectives</span>
+              <h2>From the seller&apos;s side.</h2>
+            </div>
           </div>
-          <figure className="seller-voice-quote">
-            <blockquote>“I used to rebuild the listing every time a game sold. Now I queue the next copy while the current one is live, and it restocks under the same item number.”</blockquote>
-            <figcaption><span className="seller-voice-avatar">GC</span><span><strong>GrailClub</strong><small>Game and collectibles store</small></span></figcaption>
-          </figure>
+          <div className="seller-stories-grid">
+            {sellerStories.map((story) => <article className="seller-story-card" key={story.name}>
+              <span className="seller-story-quote-mark" aria-hidden="true">“</span>
+              <blockquote>{story.quote}</blockquote>
+              <div className="seller-story-person">
+                <span className="seller-story-avatar" aria-hidden="true">{story.initials}</span>
+                <div><strong>{story.name}</strong><span>{story.role}</span></div>
+              </div>
+            </article>)}
+          </div>
+          <p className="seller-stories-note">Illustrative seller perspectives; customer quotes will follow.</p>
         </div>
       </section>
 
