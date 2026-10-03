@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const itemId = url.searchParams.get("itemId")?.trim() || defaultItemId();
+  if (!itemId) return NextResponse.json({ error: "Enter an eBay item ID first." }, { status: 400 });
   try {
     const listing = await fetchListing(itemId);
     upsertListing(listing);

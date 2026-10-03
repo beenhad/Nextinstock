@@ -3,6 +3,7 @@ export type TaskStatus =
   | "active"
   | "paused"
   | "processing"
+  | "scheduled"
   | "dry_run_ready"
   | "attention"
   | "error";
@@ -25,10 +26,26 @@ export interface ListingSnapshot {
   quantityAvailable: number;
   imageUrls: string[];
   variationCount: number;
+  variations: ListingVariation[];
+  variationPictureAxis: string | null;
   outOfStockControl: boolean | null;
   supported: boolean;
   unsupportedReasons: string[];
   fetchedAt: string;
+}
+
+export interface ListingVariation {
+  key: string;
+  sku: string | null;
+  specifics: Array<{ name: string; value: string }>;
+  label: string;
+  price: number | null;
+  currency: string;
+  quantityTotal: number;
+  quantitySold: number;
+  quantityAvailable: number;
+  imageUrls: string[];
+  hasSpecificPhotos: boolean;
 }
 
 export interface TaskPhoto {
@@ -49,7 +66,9 @@ export interface TaskPhoto {
 export interface QueuedCopy {
   id: string;
   taskId: string;
+  queuePosition: number;
   internalReference: string;
+  targetPrice: number | null;
   conditionId: string | null;
   conditionName: string | null;
   conditionDescription: string;
@@ -61,9 +80,11 @@ export interface QueuedCopy {
 export interface RestockTask {
   id: string;
   itemId: string;
+  variationKey: string | null;
   status: TaskStatus;
   listing: ListingSnapshot;
   queuedCopy: QueuedCopy | null;
+  queuedCopies: QueuedCopy[];
   armedQuantitySold: number;
   lastSeenQuantitySold: number;
   lastSeenQuantityAvailable: number;
@@ -85,20 +106,29 @@ export interface ActivityEvent {
 
 export interface SystemStatus {
   ebayConfigured: boolean;
-  ebayCredentialSource: "nextinstock" | "sellermaid" | "missing";
+  ebayCredentialSource: "nextinstock" | "sellermaid" | "environment" | "missing";
   writeMode: EbayWriteMode;
   storageDriver: "local";
   storagePath: string;
   persistentStorage: boolean;
   pollSeconds: number;
+  restockDelaySeconds: number;
   defaultItemId: string;
   liveWritesAuthorized: boolean;
   liveWritesBlocker: string | null;
+  discordConnected: boolean;
+}
+
+export interface EbayProfile {
+  userId: string;
+  avatarUrl: string | null;
+  profileUrl: string;
 }
 
 export interface RestockPlan {
   taskId: string;
   itemId: string;
+  variationKey: string | null;
   writeMode: EbayWriteMode;
   trigger: {
     armedQuantitySold: number;
@@ -111,11 +141,14 @@ export interface RestockPlan {
     conditionId: string | null;
     conditionDescription: string;
     photoCount: number;
+    targetPrice: number | null;
   } | null;
   mutation: {
     uploadLocalPhotosToEps: boolean;
     replaceAllPictureUrls: boolean;
     reviseConditionDescription: boolean;
+    revisePrice: boolean;
+    verifyWhileAtZero: boolean;
     restoreAvailableQuantityTo: 1;
   };
   blockers: string[];
@@ -126,6 +159,9 @@ export interface WorkerResult {
   action:
     | "observed"
     | "waiting_for_sale"
+    | "restock_scheduled"
+    | "waiting_for_restock"
+    | "restocking"
     | "held_at_zero"
     | "dry_run_ready"
     | "restocked"
@@ -134,4 +170,11 @@ export interface WorkerResult {
   message: string;
   listing: ListingSnapshot;
   plan?: RestockPlan;
+  scheduledFor?: string;
+  remainingQueuedCopies?: number;
+  trigger?: {
+    kind: "new_sale" | "already_at_zero";
+    previousSold: number;
+    previousAvailable: number;
+  };
 }

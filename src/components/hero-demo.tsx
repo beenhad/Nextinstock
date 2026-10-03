@@ -308,6 +308,33 @@ function NextinstockPanel({ phase, onAdvance }: { phase: number; onAdvance: () =
 }
 
 export function HeroScreenshot() {
+  const listings = [
+    {
+      itemId: "267268210473",
+      title: "Final Fantasy Collector Booster Box",
+      detail: "Magic: The Gathering",
+      image: "https://i.ebayimg.com/00/s/MTYwMFgxNjAw/z/Il0AAeSwhddoq6Q7/$_57.PNG?set_id=880000500F",
+      status: "Ready to set up",
+      statusClass: "is-eligible",
+    },
+    {
+      itemId: "267794532066",
+      title: "Resident Evil Medical Courier Bag",
+      detail: "AMC popcorn bucket",
+      image: "https://i.ebayimg.com/00/s/MTYwMFgxNjAw/z/txwAAeSwrwFqtWeK/$_57.PNG?set_id=880000500F",
+      status: "Ready to set up",
+      statusClass: "is-eligible",
+    },
+    {
+      itemId: "267794710676",
+      title: "Xbox X25 Anniversary Controller",
+      detail: "Presale · stock review needed",
+      image: "https://i.ebayimg.com/00/s/OTAwWDkwMA==/z/R1AAAeSwBBdqtXRQ/$_57.JPG?set_id=880000500F",
+      status: "Review stock",
+      statusClass: "is-review",
+    },
+  ];
+
   return (
     <div className="hero-shot-shell" aria-label="Nextinstock restock task overview">
       <div className="hero-shot-bar">
@@ -316,22 +343,30 @@ export function HeroScreenshot() {
       </div>
       <div className="hero-shot-content">
         <div className="hero-shot-heading">
-          <div><span>Restock tasks</span><strong>4 listings protected</strong></div>
-          <button type="button">+ New task</button>
+          <div><span>Product preview</span><strong>Restock tasks</strong></div>
         </div>
         <div className="hero-shot-stats">
-          <span><small>Next copies ready</small><strong>7</strong></span>
-          <span><small>Restocked this month</small><strong>18</strong></span>
-          <span><small>Needs attention</small><strong>1</strong></span>
+          <span><small>Listings shown</small><strong>3</strong></span>
+          <span><small>Ready to set up</small><strong>2</strong></span>
+          <span><small>Stock review</small><strong>1</strong></span>
         </div>
-        <div className="hero-shot-task">
-          <GamePhoto copy="current" />
-          <div className="hero-shot-title"><strong>Pokemon XD: Gale of Darkness</strong><span>eBay · 266994813467</span></div>
-          <div className="hero-shot-handoff">
-            <span>Live copy</span><ArrowRight size={14} /><span>Next copy</span>
-          </div>
-          <GamePhoto copy="next" />
-          <span className="ready-pill"><Check size={11} /> Ready</span>
+        <div className="hero-shot-list" aria-label="Example eBay listings">
+          {listings.map((listing) => (
+            <a
+              className="hero-shot-task"
+              href={`https://www.ebay.com/itm/${listing.itemId}`}
+              key={listing.itemId}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              <img src={listing.image} alt="" referrerPolicy="no-referrer" />
+              <span className="hero-shot-title">
+                <strong>{listing.title}</strong>
+                <small>{listing.detail} · eBay {listing.itemId}</small>
+              </span>
+              <span className={`hero-shot-status ${listing.statusClass}`}>{listing.status}</span>
+            </a>
+          ))}
         </div>
       </div>
     </div>
@@ -379,7 +414,7 @@ export function ProcessLoop() {
     <div className="process-loop">
       <div className="process-browser-bar">
         <div className="browser-dots"><span /><span /><span /></div>
-        <div className="process-tabs" role="tablist" aria-label="Live sale and restock interfaces">
+        <div className="process-tabs" role="tablist" aria-label="Sale and restock walkthrough">
           <button type="button" role="tab" aria-selected={activeTab === "nextinstock"} className={activeTab === "nextinstock" ? "active" : ""} onClick={() => setActiveTab("nextinstock")}>
             <BrandMark compact /> Nextinstock
           </button>
@@ -387,7 +422,7 @@ export function ProcessLoop() {
             <EbayWordmark /> Listing
           </button>
         </div>
-        <span className="process-secure">● Live UI</span>
+        <span className="process-secure">● Interactive example</span>
       </div>
 
       <ProcessStatus

@@ -53,6 +53,7 @@ function secretsPath(): string {
 interface LocalSecrets {
   ebayRefreshToken?: string;
   ebayGrantedScopes?: string[];
+  discordWebhookUrl?: string;
   updatedAt?: string;
 }
 
@@ -66,10 +67,24 @@ function readLocalSecrets(): LocalSecrets {
 
 export function saveLocalEbayGrant(refreshToken: string, scopes: string[]) {
   const payload: LocalSecrets = {
+    ...readLocalSecrets(),
     ebayRefreshToken: refreshToken,
     ebayGrantedScopes: scopes,
     updatedAt: new Date().toISOString(),
   };
+  writeFileSync(secretsPath(), JSON.stringify(payload, null, 2), { mode: 0o600 });
+  chmodSync(secretsPath(), 0o600);
+}
+
+export function discordWebhookUrl(): string | null {
+  return readLocalSecrets().discordWebhookUrl?.trim() || null;
+}
+
+export function saveDiscordWebhookUrl(url: string | null) {
+  const payload = readLocalSecrets();
+  if (url) payload.discordWebhookUrl = url;
+  else delete payload.discordWebhookUrl;
+  payload.updatedAt = new Date().toISOString();
   writeFileSync(secretsPath(), JSON.stringify(payload, null, 2), { mode: 0o600 });
   chmodSync(secretsPath(), 0o600);
 }
@@ -85,7 +100,9 @@ export function ebayCredentials() {
     ? "nextinstock"
     : process.env.SELLERMAID_ENV_FILE
       ? "sellermaid"
-      : "missing";
+      : refreshToken
+        ? "environment"
+        : "missing";
 
   return {
     appId,
@@ -93,7 +110,7 @@ export function ebayCredentials() {
     ruName,
     refreshToken,
     grantedScopes: local.ebayGrantedScopes ?? [],
-    source: source as "nextinstock" | "sellermaid" | "missing",
+    source: source as "nextinstock" | "sellermaid" | "environment" | "missing",
   };
 }
 
@@ -106,8 +123,13 @@ export function pollSeconds(): number {
   return Number.isFinite(configured) ? Math.max(15, Math.min(3600, Math.trunc(configured))) : 30;
 }
 
+export function restockDelaySeconds(): number {
+  const configured = Number(process.env.NEXTINSTOCK_RESTOCK_DELAY_SECONDS ?? 60);
+  return Number.isFinite(configured) ? Math.max(15, Math.min(900, Math.trunc(configured))) : 60;
+}
+
 export function defaultItemId(): string {
-  return process.env.NEXTINSTOCK_ITEM_ID?.trim() || "266994813467";
+  return process.env.NEXTINSTOCK_ITEM_ID?.trim() || "";
 }
 
 export function systemStatus(): SystemStatus {
@@ -116,9 +138,12 @@ export function systemStatus(): SystemStatus {
   const hasLocalWriteGrant =
     credentials.source === "nextinstock" && credentials.grantedScopes.includes(requiredWriteScope);
   const writeMode = ebayWriteMode();
+  const persistentStorage = !process.env.VERCEL;
   let liveWritesBlocker: string | null = null;
   if (writeMode !== "live") {
     liveWritesBlocker = "Write mode is dry-run.";
+  } else if (!persistentStorage) {
+    liveWritesBlocker = "Live restocking needs persistent storage and a hosted worker.";
   } else if (!hasLocalWriteGrant) {
     liveWritesBlocker = "Reconnect eBay in Nextinstock with sell.inventory permission.";
   }
@@ -129,10 +154,12 @@ export function systemStatus(): SystemStatus {
     writeMode,
     storageDriver: "local",
     storagePath: imageDirectory(),
-    persistentStorage: !process.env.VERCEL,
+    persistentStorage,
     pollSeconds: pollSeconds(),
+    restockDelaySeconds: restockDelaySeconds(),
     defaultItemId: defaultItemId(),
-    liveWritesAuthorized: writeMode === "live" && hasLocalWriteGrant,
+    liveWritesAuthorized: writeMode === "live" && persistentStorage && hasLocalWriteGrant,
     liveWritesBlocker,
+    discordConnected: Boolean(discordWebhookUrl()),
   };
 }

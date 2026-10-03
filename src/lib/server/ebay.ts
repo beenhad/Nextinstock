@@ -1,4 +1,5 @@
-import type { ListingSnapshot } from "@/lib/types";
+import { createHash } from "node:crypto";
+import type { ListingSnapshot, ListingVariation } from "@/lib/types";
 import { ebayCredentials } from "./config";
 
 const EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
@@ -65,6 +66,53 @@ function tagBlocks(xml: string, tag: string): string[] {
 function numeric(value: string | null, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function parseVariations(variationsXml: string, fallbackImageUrls: string[]): {
+  variations: ListingVariation[];
+  pictureAxis: string | null;
+} {
+  const pictures = rawTagValue(variationsXml, "Pictures") ?? "";
+  const pictureAxis = tagValue(pictures, "VariationSpecificName");
+  const pictureSets = new Map(
+    tagBlocks(pictures, "VariationSpecificPictureSet").map((block) => [
+      tagValue(block, "VariationSpecificValue") ?? "",
+      tagBlocks(block, "PictureURL").map((url) => decodeXml(url)).filter((url): url is string => Boolean(url)),
+    ]),
+  );
+  const variations = tagBlocks(variationsXml, "Variation").map((block) => {
+    const specifics = tagBlocks(rawTagValue(block, "VariationSpecifics") ?? "", "NameValueList")
+      .map((entry) => ({ name: tagValue(entry, "Name") ?? "", value: tagValue(entry, "Value") ?? "" }))
+      .filter((entry) => entry.name && entry.value);
+    const sku = tagValue(block, "SKU");
+    const identity = specifics.length
+      ? JSON.stringify([...specifics].sort((a, b) => a.name.localeCompare(b.name)))
+      : `sku:${sku ?? ""}`;
+    const key = createHash("sha256").update(identity).digest("hex").slice(0, 24);
+    const quantityTotal = numeric(tagValue(block, "Quantity"));
+    const quantitySold = numeric(tagValue(rawTagValue(block, "SellingStatus") ?? "", "QuantitySold"));
+    const explicitAvailable = tagValue(block, "QuantityAvailable");
+    const priceBlock = rawTagValue(block, "StartPrice") ?? "";
+    const price = numeric(decodeXml(priceBlock), Number.NaN);
+    const pictureValue = specifics.find((entry) => entry.name === pictureAxis)?.value ?? "";
+    const specificPhotos = pictureSets.get(pictureValue) ?? [];
+    return {
+      key,
+      sku,
+      specifics,
+      label: specifics.map(({ name, value }) => `${name}: ${value}`).join(" · ") || sku || "Unnamed variation",
+      price: Number.isFinite(price) ? price : null,
+      currency: priceBlock.match(/currencyID="([^"]+)"/)?.[1] ?? "USD",
+      quantityTotal,
+      quantitySold,
+      quantityAvailable: explicitAvailable === null
+        ? Math.max(0, quantityTotal - quantitySold)
+        : Math.max(0, numeric(explicitAvailable)),
+      imageUrls: specificPhotos.length ? specificPhotos : fallbackImageUrls,
+      hasSpecificPhotos: specificPhotos.length > 0,
+    } satisfies ListingVariation;
+  });
+  return { variations, pictureAxis };
 }
 
 function credentialsOrThrow() {
@@ -201,16 +249,22 @@ export async function fetchListing(itemId: string): Promise<ListingSnapshot> {
     explicitAvailable === null
       ? Math.max(0, quantityTotal - quantitySold)
       : Math.max(0, numeric(explicitAvailable));
-  const variationCount = variations ? tagBlocks(variations, "Variation").length : 0;
+  const imageUrls = tagBlocks(pictureDetails, "PictureURL")
+    .map((value) => decodeXml(value))
+    .filter((value): value is string => Boolean(value));
+  const parsedVariations = variations ? parseVariations(variations, imageUrls) : { variations: [], pictureAxis: null };
+  const variationCount = parsedVariations.variations.length;
   const priceBlock = rawTagValue(sellingStatus, "CurrentPrice") ?? "";
   const price = numeric(decodeXml(priceBlock), Number.NaN);
   const unsupportedReasons: string[] = [];
   if (!["FixedPriceItem", "StoresFixedPrice"].includes(listingType)) {
     unsupportedReasons.push("Only fixed-price listings are supported");
   }
-  if (variationCount > 0) unsupportedReasons.push("Variation listings are not supported yet");
   if (listingDuration !== "GTC") unsupportedReasons.push("The listing must be Good 'Til Cancelled");
   if (listingStatus !== "Active") unsupportedReasons.push("The listing must be active");
+  if (variationCount === 0 && quantityAvailable > 1) {
+    unsupportedReasons.push("The listing must have at most one available copy");
+  }
   if (outOfStockControl === false) {
     unsupportedReasons.push("Enable eBay Out-of-Stock Control before activating a task");
   }
@@ -236,15 +290,54 @@ export async function fetchListing(itemId: string): Promise<ListingSnapshot> {
     quantityTotal,
     quantitySold,
     quantityAvailable,
-    imageUrls: tagBlocks(pictureDetails, "PictureURL")
-      .map((value) => decodeXml(value))
-      .filter((value): value is string => Boolean(value)),
+    imageUrls,
     variationCount,
+    variations: parsedVariations.variations,
+    variationPictureAxis: parsedVariations.pictureAxis,
     outOfStockControl,
     supported: unsupportedReasons.length === 0,
     unsupportedReasons,
     fetchedAt: new Date().toISOString(),
   };
+}
+
+export function sellerPreviewCandidateIds(xml: string): string[] {
+  const items = tagBlocks(rawTagValue(xml, "ItemArray") ?? "", "Item");
+  return items.map((item) => {
+    const status = tagValue(rawTagValue(item, "SellingStatus") ?? "", "ListingStatus");
+    const itemId = tagValue(item, "ItemID");
+    const pictures = tagBlocks(rawTagValue(item, "PictureDetails") ?? "", "PictureURL");
+    const sold = numeric(tagValue(rawTagValue(item, "SellingStatus") ?? "", "QuantitySold"));
+    const available = tagValue(item, "QuantityAvailable");
+    const quantity = available === null ? Math.max(0, numeric(tagValue(item, "Quantity")) - sold) : numeric(available);
+    return { itemId, status, pictures, quantity };
+  }).filter((item) => item.itemId && item.status === "Active" && item.pictures.length && item.quantity > 0)
+    .sort((a, b) => Number(b.quantity === 1) - Number(a.quantity === 1))
+    .map((item) => item.itemId as string);
+}
+
+export async function fetchSellerPreviewListing(): Promise<ListingSnapshot> {
+  const now = new Date();
+  const end = new Date(now.getTime() + 119 * 24 * 60 * 60 * 1000);
+  const xml = await callTradingApi("GetSellerList", `<?xml version="1.0" encoding="utf-8"?>
+<GetSellerListRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <EndTimeFrom>${now.toISOString()}</EndTimeFrom>
+  <EndTimeTo>${end.toISOString()}</EndTimeTo>
+  <GranularityLevel>Fine</GranularityLevel>
+  <Pagination><EntriesPerPage>20</EntriesPerPage><PageNumber>1</PageNumber></Pagination>
+  <Version>1451</Version>
+</GetSellerListRequest>`);
+  for (const itemId of sellerPreviewCandidateIds(xml).slice(0, 5)) {
+    const listing = await fetchListing(itemId);
+    if (listing.listingStatus === "Active" && listing.quantityAvailable === 1 &&
+        listing.imageUrls.some((value) => {
+          try {
+            const url = new URL(value);
+            return url.protocol === "https:" && (url.hostname === "ebayimg.com" || url.hostname.endsWith(".ebayimg.com"));
+          } catch { return false; }
+        })) return listing;
+  }
+  throw new Error("No active one-unit listing with a public photo was found in the connected eBay store.");
 }
 
 export interface EbayImageUpload {
@@ -298,14 +391,22 @@ export async function reviseFixedPriceListing(input: {
   conditionDescription: string;
   pictureUrls: string[];
   availableQuantity: number;
+  targetPrice?: number | null;
+  currency?: string;
 }) {
   if (input.pictureUrls.length === 0) throw new Error("At least one eBay picture URL is required");
+  if (input.targetPrice !== null && input.targetPrice !== undefined && (!Number.isFinite(input.targetPrice) || input.targetPrice <= 0)) {
+    throw new Error("Invalid planned eBay price");
+  }
   const conditionIdXml = input.conditionId
     ? `<ConditionID>${escapeXml(input.conditionId)}</ConditionID>`
     : "";
   const pictureXml = input.pictureUrls
     .map((url) => `<PictureURL>${escapeXml(url)}</PictureURL>`)
     .join("");
+  const priceXml = input.targetPrice === null || input.targetPrice === undefined
+    ? ""
+    : `<StartPrice currencyID="${escapeXml(input.currency ?? "USD")}">${input.targetPrice.toFixed(2)}</StartPrice>`;
   await callTradingApi(
     "ReviseFixedPriceItem",
     `<?xml version="1.0" encoding="utf-8"?>
@@ -314,6 +415,7 @@ export async function reviseFixedPriceListing(input: {
     <ItemID>${escapeXml(input.itemId)}</ItemID>
     ${conditionIdXml}
     <ConditionDescription>${escapeXml(input.conditionDescription)}</ConditionDescription>
+    ${priceXml}
     <PictureDetails>
       <PictureSource>EPS</PictureSource>
       ${pictureXml}
@@ -323,6 +425,44 @@ export async function reviseFixedPriceListing(input: {
   <Version>1451</Version>
 </ReviseFixedPriceItemRequest>`,
   );
+}
+
+export async function reviseFixedPriceQuantity(itemId: string, availableQuantity: number) {
+  await callTradingApi(
+    "ReviseFixedPriceItem",
+    `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Item>
+    <ItemID>${escapeXml(itemId)}</ItemID>
+    <Quantity>${Math.max(0, Math.trunc(availableQuantity))}</Quantity>
+  </Item>
+  <Version>1451</Version>
+</ReviseFixedPriceItemRequest>`,
+  );
+}
+
+export function variationQuantityRequest(itemId: string, variation: ListingVariation, availableQuantity: number, targetPrice?: number | null): string {
+  const price = targetPrice ?? variation.price;
+  if (price === null || !Number.isFinite(price) || price <= 0) throw new Error("Variation has no valid eBay price");
+  if (!variation.specifics.length) throw new Error("Variation has no option values");
+  if (!Number.isInteger(availableQuantity) || availableQuantity < 0) throw new Error("Invalid variation quantity");
+  const specifics = variation.specifics.map(({ name, value }) =>
+    `<NameValueList><Name>${escapeXml(name)}</Name><Value>${escapeXml(value)}</Value></NameValueList>`,
+  ).join("");
+  return `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Item><ItemID>${escapeXml(itemId)}</ItemID><Variations><Variation>
+    ${variation.sku ? `<SKU>${escapeXml(variation.sku)}</SKU>` : ""}
+    <StartPrice currencyID="${escapeXml(variation.currency)}">${price.toFixed(2)}</StartPrice>
+    <Quantity>${availableQuantity}</Quantity>
+    <VariationSpecifics>${specifics}</VariationSpecifics>
+  </Variation></Variations></Item>
+  <Version>1451</Version>
+</ReviseFixedPriceItemRequest>`;
+}
+
+export async function reviseFixedPriceVariationQuantity(itemId: string, variation: ListingVariation, availableQuantity: number, targetPrice?: number | null) {
+  await callTradingApi("ReviseFixedPriceItem", variationQuantityRequest(itemId, variation, availableQuantity, targetPrice));
 }
 
 export function ebayConsentUrl(state: string): string {

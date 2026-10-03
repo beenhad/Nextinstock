@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { addQueuedCopy, getTask } from "@/lib/server/database";
 import { fetchListing } from "@/lib/server/ebay";
 import { storeTaskImages } from "@/lib/server/storage";
+import { parseTargetPrice } from "@/lib/server/price";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,19 +16,19 @@ export async function POST(
     const { taskId } = await context.params;
     const current = getTask(taskId);
     if (!current) return NextResponse.json({ error: "Task not found" }, { status: 404 });
-    if (current.queuedCopy) {
-      return NextResponse.json({ error: "This task already has a queued copy" }, { status: 409 });
-    }
-
     const form = await request.formData();
     const internalReference = String(form.get("internalReference") ?? "").trim().slice(0, 100);
     const conditionDescription = String(form.get("conditionDescription") ?? "").trim().slice(0, 1000);
+    const targetPrice = parseTargetPrice(form.get("targetPrice"));
     const files = form.getAll("photos").filter((value): value is File => value instanceof File);
     if (!internalReference) {
       return NextResponse.json({ error: "Add an internal copy reference" }, { status: 400 });
     }
-    if (!conditionDescription) {
+    if (!current.variationKey && !conditionDescription) {
       return NextResponse.json({ error: "Add the exact condition note" }, { status: 400 });
+    }
+    if (!current.variationKey && !files.length) {
+      return NextResponse.json({ error: "Add at least one photo" }, { status: 400 });
     }
 
     const listing = await fetchListing(current.itemId);
@@ -35,18 +36,19 @@ export async function POST(
       return NextResponse.json({ error: listing.unsupportedReasons.join(". ") }, { status: 422 });
     }
     const copyId = randomUUID();
-    const images = await storeTaskImages(taskId, copyId, files);
+    const images = files.length ? await storeTaskImages(taskId, copyId, files) : [];
     const task = addQueuedCopy({
       taskId,
       copyId,
       snapshot: listing,
       internalReference,
       conditionDescription,
+      targetPrice,
       images,
     });
     return NextResponse.json({ task }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not queue the next copy";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: message.includes("price") ? 400 : 500 });
   }
 }

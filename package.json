@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
-    "start": "next start",
+    "start": "next start --hostname 127.0.0.1",
+    "start:local": "node scripts/start-local.mjs",
+    "setup:local": "node scripts/setup-local.mjs",
+    "package:release": "node scripts/package-release.mjs",
     "check": "tsc --noEmit",
+    "test": "tsx --test src/lib/server/*.test.ts",
     "worker": "tsx scripts/restock-worker.ts",
     "worker:once": "tsx scripts/restock-worker.ts --once"
   },
@@ -14,10 +18,11 @@
     "@ebay/skin": "^19.29.0",
     "dotenv": "^17.4.2",
     "lucide-react": "1.25.0",
-    "next": "16.2.11",
+    "next": "16.3.8",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "sharp": "0.35.3"
+    "sharp": "0.35.5",
+    "stripe": "^23.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
@@ -27,7 +32,7 @@
     "typescript": "5.9.3"
   },
   "overrides": {
-    "postcss": "8.5.20",
-    "sharp": "0.35.3"
+    "postcss": "8.5.28",
+    "sharp": "0.35.5"
   }
 }

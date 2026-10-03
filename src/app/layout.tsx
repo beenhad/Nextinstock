@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Nextinstock — Keep the listing. Change the copy.",
   description:
-    "Queue copy-specific photos for replenishable preowned game listings and restock the same eBay listing safely.",
+    "Sell replenishable preowned inventory one copy at a time, with photos and condition notes that match each copy.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

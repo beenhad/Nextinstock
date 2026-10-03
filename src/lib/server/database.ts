@@ -10,6 +10,7 @@ import type {
   TaskStatus,
 } from "@/lib/types";
 import { dataDirectory } from "./config";
+import { assertTargetPrice } from "./price";
 import type { StoredImage } from "./storage";
 
 let instance: DatabaseSync | null = null;
@@ -39,6 +40,8 @@ function database(): DatabaseSync {
       quantity_available INTEGER NOT NULL,
       image_urls_json TEXT NOT NULL,
       variation_count INTEGER NOT NULL,
+      variations_json TEXT NOT NULL DEFAULT '[]',
+      variation_picture_axis TEXT,
       out_of_stock_control INTEGER,
       supported INTEGER NOT NULL,
       unsupported_reasons_json TEXT NOT NULL,
@@ -47,16 +50,20 @@ function database(): DatabaseSync {
 
     CREATE TABLE IF NOT EXISTS restock_tasks (
       id TEXT PRIMARY KEY,
-      item_id TEXT NOT NULL UNIQUE REFERENCES listings(item_id) ON DELETE CASCADE,
+      item_id TEXT NOT NULL REFERENCES listings(item_id) ON DELETE CASCADE,
+      variation_key TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL,
       armed_quantity_sold INTEGER NOT NULL,
       last_seen_quantity_sold INTEGER NOT NULL,
       last_seen_quantity_available INTEGER NOT NULL,
       last_checked_at TEXT,
       last_error TEXT,
+      lease_owner TEXT,
+      lease_expires_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
 
     CREATE TABLE IF NOT EXISTS copies (
       id TEXT PRIMARY KEY,
@@ -65,6 +72,8 @@ function database(): DatabaseSync {
       condition_id TEXT,
       condition_name TEXT,
       condition_description TEXT NOT NULL,
+      target_price REAL,
+      queue_position INTEGER,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -93,6 +102,7 @@ function database(): DatabaseSync {
       task_id TEXT NOT NULL REFERENCES restock_tasks(id) ON DELETE CASCADE,
       trigger_quantity_sold INTEGER NOT NULL,
       status TEXT NOT NULL,
+      execute_after TEXT,
       ebay_picture_urls_json TEXT NOT NULL DEFAULT '[]',
       error TEXT,
       created_at TEXT NOT NULL,
@@ -110,6 +120,16 @@ function database(): DatabaseSync {
       dedupe_key TEXT UNIQUE,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS discord_notifications (
+      event_key TEXT PRIMARY KEY,
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      sent_at TEXT
+    );
   `);
   const listingColumns = db.prepare("PRAGMA table_info(listings)").all() as Array<{
     name?: string;
@@ -117,6 +137,72 @@ function database(): DatabaseSync {
   if (!listingColumns.some((column) => column.name === "out_of_stock_control")) {
     db.exec("ALTER TABLE listings ADD COLUMN out_of_stock_control INTEGER");
   }
+  if (!listingColumns.some((column) => column.name === "variations_json")) {
+    db.exec("ALTER TABLE listings ADD COLUMN variations_json TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!listingColumns.some((column) => column.name === "variation_picture_axis")) {
+    db.exec("ALTER TABLE listings ADD COLUMN variation_picture_axis TEXT");
+  }
+  const taskColumns = db.prepare("PRAGMA table_info(restock_tasks)").all() as Array<{ name?: string }>;
+  if (!taskColumns.some((column) => column.name === "lease_owner")) {
+    db.exec("ALTER TABLE restock_tasks ADD COLUMN lease_owner TEXT");
+  }
+  if (!taskColumns.some((column) => column.name === "lease_expires_at")) {
+    db.exec("ALTER TABLE restock_tasks ADD COLUMN lease_expires_at TEXT");
+  }
+  if (!taskColumns.some((column) => column.name === "variation_key")) {
+    // Old SQLite schema made item_id unique. Rebuild it to allow one task per variation.
+    db.exec("PRAGMA foreign_keys = OFF");
+    try {
+      db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE restock_tasks_new (
+          id TEXT PRIMARY KEY,
+          item_id TEXT NOT NULL REFERENCES listings(item_id) ON DELETE CASCADE,
+          variation_key TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL,
+          armed_quantity_sold INTEGER NOT NULL,
+          last_seen_quantity_sold INTEGER NOT NULL,
+          last_seen_quantity_available INTEGER NOT NULL,
+          last_checked_at TEXT,
+          last_error TEXT,
+          lease_owner TEXT,
+          lease_expires_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(item_id, variation_key)
+        );
+        INSERT INTO restock_tasks_new (
+          id, item_id, status, armed_quantity_sold, last_seen_quantity_sold,
+          last_seen_quantity_available, last_checked_at, last_error,
+          lease_owner, lease_expires_at, created_at, updated_at
+        ) SELECT id, item_id, status, armed_quantity_sold, last_seen_quantity_sold,
+          last_seen_quantity_available, last_checked_at, last_error,
+          lease_owner, lease_expires_at, created_at, updated_at FROM restock_tasks;
+        DROP TABLE restock_tasks;
+        ALTER TABLE restock_tasks_new RENAME TO restock_tasks;
+        COMMIT;
+      `);
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON");
+    }
+  }
+  const copyColumns = db.prepare("PRAGMA table_info(copies)").all() as Array<{ name?: string }>;
+  if (!copyColumns.some((column) => column.name === "target_price")) {
+    db.exec("ALTER TABLE copies ADD COLUMN target_price REAL");
+  }
+  if (!copyColumns.some((column) => column.name === "queue_position")) {
+    db.exec("ALTER TABLE copies ADD COLUMN queue_position INTEGER");
+  }
+  db.exec("UPDATE copies SET queue_position = rowid WHERE queue_position IS NULL");
+  const handoffColumns = db.prepare("PRAGMA table_info(handoff_runs)").all() as Array<{ name?: string }>;
+  if (!handoffColumns.some((column) => column.name === "execute_after")) {
+    db.exec("ALTER TABLE handoff_runs ADD COLUMN execute_after TEXT");
+  }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS restock_tasks_item_variation_idx ON restock_tasks(item_id, variation_key)");
   instance = db;
   return db;
 }
@@ -152,8 +238,8 @@ export function upsertListing(snapshot: ListingSnapshot) {
       listing_duration, condition_id, condition_name, condition_description,
       price, currency, quantity_total, quantity_sold, quantity_available,
       image_urls_json, variation_count, out_of_stock_control, supported,
-      unsupported_reasons_json, fetched_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      variations_json, variation_picture_axis, unsupported_reasons_json, fetched_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(item_id) DO UPDATE SET
       sku = excluded.sku,
       title = excluded.title,
@@ -171,6 +257,8 @@ export function upsertListing(snapshot: ListingSnapshot) {
       quantity_available = excluded.quantity_available,
       image_urls_json = excluded.image_urls_json,
       variation_count = excluded.variation_count,
+      variations_json = excluded.variations_json,
+      variation_picture_axis = excluded.variation_picture_axis,
       out_of_stock_control = excluded.out_of_stock_control,
       supported = excluded.supported,
       unsupported_reasons_json = excluded.unsupported_reasons_json,
@@ -195,6 +283,8 @@ export function upsertListing(snapshot: ListingSnapshot) {
     snapshot.variationCount,
     snapshot.outOfStockControl === null ? null : snapshot.outOfStockControl ? 1 : 0,
     snapshot.supported ? 1 : 0,
+    JSON.stringify(snapshot.variations),
+    snapshot.variationPictureAxis,
     JSON.stringify(snapshot.unsupportedReasons),
     snapshot.fetchedAt,
   );
@@ -219,6 +309,8 @@ function mapListing(row: Record<string, unknown>): ListingSnapshot {
     quantityAvailable: asNumber(row.quantity_available),
     imageUrls: parseJson<string[]>(row.image_urls_json, []),
     variationCount: asNumber(row.variation_count),
+    variations: parseJson(row.variations_json, []),
+    variationPictureAxis: asNullableString(row.variation_picture_axis),
     outOfStockControl:
       row.out_of_stock_control === null || row.out_of_stock_control === undefined
         ? null
@@ -227,6 +319,22 @@ function mapListing(row: Record<string, unknown>): ListingSnapshot {
     unsupportedReasons: parseJson<string[]>(row.unsupported_reasons_json, []),
     fetchedAt: asString(row.fetched_at),
   };
+}
+
+export function latestListingWithImage(): ListingSnapshot | null {
+  const rows = database().prepare(
+    "SELECT * FROM listings WHERE image_urls_json != '[]' ORDER BY fetched_at DESC",
+  ).all() as Record<string, unknown>[];
+  for (const row of rows) {
+    const listing = mapListing(row);
+    if (listing.imageUrls.some((value) => {
+      try {
+        const url = new URL(value);
+        return url.protocol === "https:" && (url.hostname === "ebayimg.com" || url.hostname.endsWith(".ebayimg.com"));
+      } catch { return false; }
+    })) return listing;
+  }
+  return null;
 }
 
 function photosForCopy(copyId: string): TaskPhoto[] {
@@ -255,7 +363,9 @@ function mapCopy(row: Record<string, unknown> | undefined): QueuedCopy | null {
   return {
     id,
     taskId: asString(row.task_id),
+    queuePosition: asNumber(row.queue_position),
     internalReference: asString(row.internal_reference),
+    targetPrice: row.target_price === null || row.target_price === undefined ? null : asNumber(row.target_price),
     conditionId: asNullableString(row.condition_id),
     conditionName: asNullableString(row.condition_name),
     conditionDescription: asString(row.condition_description),
@@ -267,15 +377,18 @@ function mapCopy(row: Record<string, unknown> | undefined): QueuedCopy | null {
 
 function taskFromRow(row: Record<string, unknown>): RestockTask {
   const listing = mapListing(row);
-  const copy = database().prepare(
-    "SELECT * FROM copies WHERE task_id = ? AND status IN ('queued', 'applying', 'failed') ORDER BY created_at ASC LIMIT 1",
-  ).get(asString(row.task_id)) as Record<string, unknown> | undefined;
+  const copyRows = database().prepare(
+    "SELECT * FROM copies WHERE task_id = ? AND status IN ('queued', 'applying', 'failed') ORDER BY queue_position ASC, created_at ASC, rowid ASC",
+  ).all(asString(row.task_id)) as Record<string, unknown>[];
+  const queuedCopies = copyRows.map((copy) => mapCopy(copy)).filter((copy): copy is QueuedCopy => Boolean(copy));
   return {
     id: asString(row.task_id),
     itemId: asString(row.item_id),
+    variationKey: asNullableString(row.variation_key),
     status: asString(row.task_status) as TaskStatus,
     listing,
-    queuedCopy: mapCopy(copy),
+    queuedCopy: queuedCopies[0] ?? null,
+    queuedCopies,
     armedQuantitySold: asNumber(row.armed_quantity_sold),
     lastSeenQuantitySold: asNumber(row.last_seen_quantity_sold),
     lastSeenQuantityAvailable: asNumber(row.last_seen_quantity_available),
@@ -289,6 +402,7 @@ function taskFromRow(row: Record<string, unknown>): RestockTask {
 const TASK_SELECT = `
   SELECT
     t.id AS task_id,
+    t.variation_key,
     t.status AS task_status,
     t.armed_quantity_sold,
     t.last_seen_quantity_sold,
@@ -317,47 +431,88 @@ export function getTask(taskId: string): RestockTask | null {
   return row ? taskFromRow(row) : null;
 }
 
+const TASK_LEASE_MS = 15 * 60 * 1000;
+
+export function acquireTaskLease(taskId: string, owner: string): boolean {
+  const timestamp = now();
+  const expiresAt = new Date(Date.now() + TASK_LEASE_MS).toISOString();
+  const result = database().prepare(`
+    UPDATE restock_tasks SET lease_owner = ?, lease_expires_at = ?
+    WHERE id = ? AND (lease_owner IS NULL OR lease_expires_at <= ?)
+      AND NOT EXISTS (
+        SELECT 1 FROM restock_tasks other
+        WHERE other.item_id = restock_tasks.item_id AND other.id != restock_tasks.id
+          AND other.lease_owner IS NOT NULL AND other.lease_expires_at > ?
+      )
+  `).run(owner, expiresAt, taskId, timestamp, timestamp);
+  return result.changes === 1;
+}
+
+export function renewTaskLease(taskId: string, owner: string) {
+  const result = database().prepare(`
+    UPDATE restock_tasks SET lease_expires_at = ?
+    WHERE id = ? AND lease_owner = ? AND lease_expires_at > ?
+  `).run(new Date(Date.now() + TASK_LEASE_MS).toISOString(), taskId, owner, now());
+  if (result.changes !== 1) throw new Error("Task check lost its execution lease");
+}
+
+export function releaseTaskLease(taskId: string, owner: string) {
+  database().prepare(`
+    UPDATE restock_tasks SET lease_owner = NULL, lease_expires_at = NULL
+    WHERE id = ? AND lease_owner = ?
+  `).run(taskId, owner);
+}
+
 export function createTask(input: {
   taskId: string;
   copyId: string;
   snapshot: ListingSnapshot;
+  variationKey?: string | null;
   internalReference: string;
   conditionDescription: string;
+  targetPrice?: number | null;
   images: StoredImage[];
 }): RestockTask {
   const db = database();
   const timestamp = now();
+  const variationKey = input.variationKey ?? null;
+  const variation = variationKey ? input.snapshot.variations.find((candidate) => candidate.key === variationKey) : null;
+  if (input.snapshot.variations.length && !variation) throw new Error("Select a valid variation");
+  if (!input.snapshot.variations.length && variationKey) throw new Error("This listing has no variations");
+  const selected = variation ?? input.snapshot;
+  const targetPrice = assertTargetPrice(input.targetPrice);
   const armedQuantitySold =
-    input.snapshot.quantityAvailable === 0
-      ? input.snapshot.quantitySold
-      : input.snapshot.quantitySold + 1;
+    selected.quantityAvailable === 0
+      ? selected.quantitySold
+      : selected.quantitySold + selected.quantityAvailable;
   db.exec("BEGIN IMMEDIATE");
   try {
     upsertListing(input.snapshot);
-    const existing = db.prepare("SELECT id FROM restock_tasks WHERE item_id = ?").get(
-      input.snapshot.itemId,
+    const existing = db.prepare("SELECT id FROM restock_tasks WHERE item_id = ? AND variation_key = ?").get(
+      input.snapshot.itemId, variationKey ?? "",
     );
     if (existing) throw new Error("A restock task already exists for this listing");
 
     db.prepare(`
       INSERT INTO restock_tasks (
-        id, item_id, status, armed_quantity_sold, last_seen_quantity_sold,
+        id, item_id, variation_key, status, armed_quantity_sold, last_seen_quantity_sold,
         last_seen_quantity_available, created_at, updated_at
-      ) VALUES (?, ?, 'active', ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
     `).run(
       input.taskId,
       input.snapshot.itemId,
+      variationKey ?? "",
       armedQuantitySold,
-      input.snapshot.quantitySold,
-      input.snapshot.quantityAvailable,
+      selected.quantitySold,
+      selected.quantityAvailable,
       timestamp,
       timestamp,
     );
     db.prepare(`
       INSERT INTO copies (
         id, task_id, internal_reference, condition_id, condition_name,
-        condition_description, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+        condition_description, target_price, queue_position, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'queued', ?, ?)
     `).run(
       input.copyId,
       input.taskId,
@@ -365,6 +520,7 @@ export function createTask(input: {
       input.snapshot.conditionId,
       input.snapshot.conditionName,
       input.conditionDescription,
+      targetPrice,
       timestamp,
       timestamp,
     );
@@ -397,9 +553,11 @@ export function createTask(input: {
       details: {
         itemId: input.snapshot.itemId,
         armedQuantitySold,
-        listingWasAlreadyAtZero: input.snapshot.quantityAvailable === 0,
+        variationKey,
+        listingWasAlreadyAtZero: selected.quantityAvailable === 0,
         queuedCopy: input.internalReference,
         photoCount: input.images.length,
+        targetPrice,
       },
       dedupeKey: `task-created:${input.taskId}`,
     });
@@ -419,23 +577,34 @@ export function addQueuedCopy(input: {
   snapshot: ListingSnapshot;
   internalReference: string;
   conditionDescription: string;
+  targetPrice?: number | null;
   images: StoredImage[];
 }): RestockTask {
   const current = getTask(input.taskId);
   if (!current) throw new Error("Restock task not found");
-  if (current.queuedCopy) throw new Error("This task already has a queued copy");
+  if (current.queuedCopies.length >= 100) throw new Error("A task can queue at most 100 copies");
   if (current.itemId !== input.snapshot.itemId) throw new Error("Listing does not match the task");
+  if (current.variationKey && !input.snapshot.variations.some((variation) => variation.key === current.variationKey)) {
+    throw new Error("The selected variation is no longer on eBay");
+  }
 
   const db = database();
   const timestamp = now();
+  const targetPrice = assertTargetPrice(input.targetPrice);
   db.exec("BEGIN IMMEDIATE");
   try {
     upsertListing(input.snapshot);
+    const queuePosition = asNumber((db.prepare(
+      "SELECT COALESCE(MAX(queue_position), 0) + 1 AS next_position FROM copies WHERE task_id = ?",
+    ).get(input.taskId) as Record<string, unknown>).next_position);
+    const hadQueuedCopy = Boolean(db.prepare(
+      "SELECT id FROM copies WHERE task_id = ? AND status IN ('queued', 'applying', 'failed') LIMIT 1",
+    ).get(input.taskId));
     db.prepare(`
       INSERT INTO copies (
         id, task_id, internal_reference, condition_id, condition_name,
-        condition_description, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+        condition_description, target_price, queue_position, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
     `).run(
       input.copyId,
       input.taskId,
@@ -443,6 +612,8 @@ export function addQueuedCopy(input: {
       input.snapshot.conditionId,
       input.snapshot.conditionName,
       input.conditionDescription,
+      targetPrice,
+      queuePosition,
       timestamp,
       timestamp,
     );
@@ -467,22 +638,19 @@ export function addQueuedCopy(input: {
         timestamp,
       );
     });
-    db.prepare(`
-      UPDATE restock_tasks SET
-        status = 'active',
-        last_seen_quantity_sold = ?,
-        last_seen_quantity_available = ?,
-        last_checked_at = ?,
-        last_error = NULL,
-        updated_at = ?
-      WHERE id = ?
-    `).run(
-      input.snapshot.quantitySold,
-      input.snapshot.quantityAvailable,
-      input.snapshot.fetchedAt,
-      timestamp,
-      input.taskId,
-    );
+    if (!hadQueuedCopy) {
+      const selected = input.snapshot.variations.find((variation) => variation.key === current.variationKey) ?? input.snapshot;
+      db.prepare(`
+        UPDATE restock_tasks SET
+          status = 'active',
+          last_seen_quantity_sold = ?,
+          last_seen_quantity_available = ?,
+          last_checked_at = ?,
+          last_error = NULL,
+          updated_at = ?
+        WHERE id = ?
+      `).run(selected.quantitySold, selected.quantityAvailable, input.snapshot.fetchedAt, timestamp, input.taskId);
+    }
     appendActivity({
       taskId: input.taskId,
       type: "copy_queued",
@@ -492,6 +660,8 @@ export function addQueuedCopy(input: {
         itemId: input.snapshot.itemId,
         copyId: input.copyId,
         photoCount: input.images.length,
+        targetPrice,
+        queuePosition,
         listingAtZero: input.snapshot.quantityAvailable === 0,
       },
       dedupeKey: `copy-queued:${input.copyId}`,
@@ -503,6 +673,66 @@ export function addQueuedCopy(input: {
   }
   const updated = getTask(input.taskId);
   if (!updated) throw new Error("Queued copy was not saved");
+  return updated;
+}
+
+export function updateQueuedCopyPrice(taskId: string, copyId: string, targetPrice: number | null): RestockTask {
+  const price = assertTargetPrice(targetPrice);
+  const db = database();
+  const timestamp = now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const task = db.prepare("SELECT lease_owner, lease_expires_at FROM restock_tasks WHERE id = ?").get(taskId) as Record<string, unknown> | undefined;
+    if (!task) throw new Error("Restock task not found");
+    if (task.lease_owner && asString(task.lease_expires_at) > timestamp) throw new Error("Wait for the current restock check to finish");
+    const result = db.prepare(`
+      UPDATE copies SET target_price = ?, updated_at = ?
+      WHERE id = ? AND task_id = ? AND status = 'queued'
+    `).run(price, timestamp, copyId, taskId);
+    if (result.changes !== 1) throw new Error("Queued copy not found or already in use");
+    appendActivity({ taskId, type: "queued_price_updated", level: "info", message: price === null ? "Queued copy will keep the live eBay price" : `Queued copy price set to ${price.toFixed(2)}`, details: { copyId, targetPrice: price } });
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  const updated = getTask(taskId);
+  if (!updated) throw new Error("Restock task not found");
+  return updated;
+}
+
+export function moveQueuedCopy(taskId: string, copyId: string, direction: "up" | "down"): RestockTask {
+  const db = database();
+  const timestamp = now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const task = db.prepare("SELECT status, lease_owner, lease_expires_at FROM restock_tasks WHERE id = ?").get(taskId) as Record<string, unknown> | undefined;
+    if (!task) throw new Error("Restock task not found");
+    if (asString(task.status) === "scheduled" || (task.lease_owner && asString(task.lease_expires_at) > timestamp)) {
+      throw new Error("Queue order is locked during a restock handoff");
+    }
+    const rows = db.prepare(`
+      SELECT id, queue_position FROM copies WHERE task_id = ? AND status = 'queued'
+      ORDER BY queue_position ASC, created_at ASC, rowid ASC
+    `).all(taskId) as Record<string, unknown>[];
+    const index = rows.findIndex((row) => row.id === copyId);
+    if (index < 0) throw new Error("Queued copy not found or already in use");
+    const other = rows[index + (direction === "up" ? -1 : 1)];
+    if (other) {
+      const current = rows[index];
+      db.prepare("UPDATE copies SET queue_position = ?, updated_at = ? WHERE id = ?")
+        .run(asNumber(other.queue_position), timestamp, copyId);
+      db.prepare("UPDATE copies SET queue_position = ?, updated_at = ? WHERE id = ?")
+        .run(asNumber(current.queue_position), timestamp, asString(other.id));
+      appendActivity({ taskId, type: "queued_copy_moved", level: "info", message: "Queued copy order changed", details: { copyId, direction } });
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  const updated = getTask(taskId);
+  if (!updated) throw new Error("Restock task not found");
   return updated;
 }
 
@@ -544,6 +774,31 @@ export function listActivity(limit = 100): ActivityEvent[] {
   }));
 }
 
+export function queueDiscordNotification(eventKey: string, payload: Record<string, unknown>) {
+  database().prepare(`
+    INSERT OR IGNORE INTO discord_notifications (event_key, payload_json, created_at)
+    VALUES (?, ?, ?)
+  `).run(eventKey, JSON.stringify(payload), now());
+}
+
+export function pendingDiscordNotifications(limit = 20): Array<{ eventKey: string; payload: Record<string, unknown> }> {
+  const rows = database().prepare(`
+    SELECT event_key, payload_json FROM discord_notifications
+    WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?
+  `).all(limit) as Record<string, unknown>[];
+  return rows.map((row) => ({
+    eventKey: asString(row.event_key),
+    payload: parseJson<Record<string, unknown>>(row.payload_json, {}),
+  }));
+}
+
+export function recordDiscordDelivery(eventKey: string, error: string | null) {
+  database().prepare(`
+    UPDATE discord_notifications SET status = ?, attempts = attempts + 1,
+      last_error = ?, sent_at = ? WHERE event_key = ?
+  `).run(error ? 'pending' : 'sent', error, error ? null : now(), eventKey);
+}
+
 export function photoStorageRecord(photoId: string): { storageKey: string; mimeType: string } | null {
   const row = database().prepare("SELECT storage_key, mime_type FROM photos WHERE id = ?").get(
     photoId,
@@ -560,6 +815,9 @@ export function activeTaskIds(): string[] {
 
 export function recordObservation(taskId: string, snapshot: ListingSnapshot) {
   const db = database();
+  const task = getTask(taskId);
+  if (!task) throw new Error("Task not found");
+  const selected = snapshot.variations.find((variation) => variation.key === task.variationKey) ?? snapshot;
   db.exec("BEGIN IMMEDIATE");
   try {
     upsertListing(snapshot);
@@ -571,8 +829,8 @@ export function recordObservation(taskId: string, snapshot: ListingSnapshot) {
         updated_at = ?
       WHERE id = ?
     `).run(
-      snapshot.quantitySold,
-      snapshot.quantityAvailable,
+      selected.quantitySold,
+      selected.quantityAvailable,
       snapshot.fetchedAt,
       now(),
       taskId,
@@ -595,6 +853,7 @@ export interface HandoffRun {
   taskId: string;
   triggerQuantitySold: number;
   status: string;
+  executeAfter: string | null;
   ebayPictureUrls: string[];
   error: string | null;
 }
@@ -616,9 +875,18 @@ export function getOrCreateHandoffRun(taskId: string, triggerQuantitySold: numbe
     taskId: asString(row.task_id),
     triggerQuantitySold: asNumber(row.trigger_quantity_sold),
     status: asString(row.status),
+    executeAfter: asNullableString(row.execute_after),
     ebayPictureUrls: parseJson<string[]>(row.ebay_picture_urls_json, []),
     error: asNullableString(row.error),
   };
+}
+
+export function scheduleHandoffRun(runId: string, executeAfter: string): boolean {
+  const result = database().prepare(`
+    UPDATE handoff_runs SET status = 'scheduled', execute_after = ?, error = NULL, updated_at = ?
+    WHERE id = ? AND status IN ('created', 'blocked', 'dry_run')
+  `).run(executeAfter, now(), runId);
+  return result.changes === 1;
 }
 
 export function updateHandoffRun(
@@ -654,6 +922,9 @@ export function completeHandoff(input: {
   snapshot: ListingSnapshot;
 }) {
   const db = database();
+  const task = getTask(input.taskId);
+  if (!task) throw new Error("Task not found");
+  const selected = input.snapshot.variations.find((variation) => variation.key === task.variationKey) ?? input.snapshot;
   const timestamp = now();
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -665,9 +936,12 @@ export function completeHandoff(input: {
       timestamp,
       input.copyId,
     );
+    const remaining = asNumber((db.prepare(
+      "SELECT COUNT(*) AS count FROM copies WHERE task_id = ? AND status IN ('queued', 'applying', 'failed')",
+    ).get(input.taskId) as Record<string, unknown>).count);
     db.prepare(`
       UPDATE restock_tasks SET
-        status = 'attention',
+        status = ?,
         armed_quantity_sold = ?,
         last_seen_quantity_sold = ?,
         last_seen_quantity_available = ?,
@@ -676,9 +950,10 @@ export function completeHandoff(input: {
         updated_at = ?
       WHERE id = ?
     `).run(
-      input.snapshot.quantitySold + 1,
-      input.snapshot.quantitySold,
-      input.snapshot.quantityAvailable,
+      remaining > 0 ? "active" : "attention",
+      selected.quantitySold + 1,
+      selected.quantitySold,
+      selected.quantityAvailable,
       input.snapshot.fetchedAt,
       timestamp,
       input.taskId,
@@ -688,12 +963,15 @@ export function completeHandoff(input: {
       taskId: input.taskId,
       type: "restock_completed",
       level: "success",
-      message: "Queued copy is live on eBay; queue now needs another copy",
+      message: remaining > 0
+        ? `Queued copy is live on eBay; ${remaining} ${remaining === 1 ? "copy remains" : "copies remain"}`
+        : "Queued copy is live on eBay; queue now needs another copy",
       details: {
         itemId: input.snapshot.itemId,
         quantityAvailable: input.snapshot.quantityAvailable,
         quantitySold: input.snapshot.quantitySold,
         copyId: input.copyId,
+        remainingQueuedCopies: remaining,
       },
       dedupeKey: `restock-complete:${input.runId}`,
     });
