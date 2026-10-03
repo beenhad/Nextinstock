@@ -1,20 +1,20 @@
 import Link from "next/link";
 import { BrandMark } from "./brand-mark";
 
-export function SiteHeader({ hosted = false }: { hosted?: boolean }) {
+export function SiteHeader() {
   return (
     <header className="site-header">
       <div className="site-container header-main">
-        <Link className="brand-link" href="/" aria-label="Nextinstock home">
+        <Link className="brand-link" href="/" aria-label="Next home">
           <BrandMark />
         </Link>
         <nav className="site-nav" aria-label="Main navigation">
-          <a href="#built-for">Use cases</a>
-          <a href="#how-it-works">How it works</a>
-          <a href="#pricing">Pricing</a>
-          {!hosted && <Link href="/tool">Open tool</Link>}
+          <a href="/#how-it-works">How it works</a>
+          <a href="/#seller-story">Seller story</a>
+          <a href="/#pricing">Pricing</a>
+          <Link href="/docs">Docs</Link>
         </nav>
-        <a className="header-tool-link" href="#pricing">Get access</a>
+        <a className="header-tool-link" href="/#pricing">See Desktop</a>
       </div>
     </header>
   );

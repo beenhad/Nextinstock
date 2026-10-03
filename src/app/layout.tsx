@@ -3,9 +3,9 @@ import "@ebay/skin/index.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Nextinstock — Keep the listing. Change the copy.",
+  title: "Next — Restock less. Keep selling.",
   description:
-    "Sell replenishable preowned inventory one copy at a time, with photos and condition notes that match each copy.",
+    "Queue the next copy. Restock the same eBay listing after it sells.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

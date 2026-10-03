@@ -95,7 +95,7 @@ function restockAction(result: WorkerResult): string {
   if (result.action === "restocked") {
     if (result.remainingQueuedCopies === 0) return "One unit is live. No other copies are queued for the next sale.";
     if (result.remainingQueuedCopies !== undefined) return `One unit is live. ${result.remainingQueuedCopies} ${result.remainingQueuedCopies === 1 ? "copy" : "copies"} queued for the next sale.`;
-    return "One unit is live. Check the next copy in Nextinstock.";
+    return "One unit is live. Check the next copy in Next.";
   }
   if (result.action === "failed") {
     return `Review Activity. ${shortPlainText(result.message, 95)}`;
@@ -104,7 +104,7 @@ function restockAction(result: WorkerResult): string {
     return `Review task before restocking. ${shortPlainText(result.message, 90)}`;
   }
   if (result.action !== "restock_scheduled" || !result.scheduledFor || !copy) {
-    return "Review the restock task in Nextinstock.";
+    return "Review the restock task in Next.";
   }
   const eligibleAt = Math.floor(Date.parse(result.scheduledFor) / 1000);
   return `Awaiting restock · eligible <t:${eligibleAt}:R> (next worker check)\n${work}`;
@@ -150,13 +150,13 @@ function productEmbed(listing: ListingSnapshot, options: {
 
 export function buildTestDiscordPayload(at = new Date()): DiscordWebhookPayload {
   return {
-    username: "Nextinstock",
+    username: "Next",
     embeds: [{
       title: "🔔 Connection test",
       description: "Discord alerts are connected. No eBay listing was checked or changed.",
       color: COLORS.test,
       timestamp: at.toISOString(),
-      footer: { text: "Nextinstock · Test" },
+      footer: { text: "Next · Test" },
     }],
   };
 }
@@ -181,14 +181,14 @@ export function buildPreviewDiscordPayload(listing: ListingSnapshot, at = new Da
     { ...base, action: "held_at_zero", plan: { ...plan, copy: null } },
     { ...base, action: "dry_run_ready" },
     { ...base, action: "failed", message: "eBay did not confirm the queued revision" },
-    { ...base, action: "skipped", message: "Listing changed outside Nextinstock" },
+    { ...base, action: "skipped", message: "Listing changed outside Next" },
   ];
   const embeds = results.map((result, index) => {
     const embed = buildWorkerDiscordPayload(result, at)?.embeds?.[0];
     if (!embed) throw new Error("Could not build a Discord alert preview");
     return { ...embed, footer: { text: `PREVIEW ${index + 1}/${results.length} · Trigger ${sold} sold · Simulated · No eBay change` } };
   });
-  return { username: "Nextinstock", embeds };
+  return { username: "Next", embeds };
 }
 
 export function buildWorkerDiscordPayload(result: WorkerResult, at = new Date()): DiscordWebhookPayload | null {
@@ -211,7 +211,7 @@ export function buildWorkerDiscordPayload(result: WorkerResult, at = new Date())
     : `eBay ${result.listing.itemId}`;
   const showChange = result.trigger?.kind === "new_sale" && ["restock_scheduled", "dry_run_ready", "held_at_zero"].includes(result.action);
   return {
-    username: "Nextinstock",
+    username: "Next",
     embeds: [productEmbed(result.listing, {
       ...status,
       color,
@@ -233,7 +233,7 @@ export async function configureDiscordWebhook(webhookUrl: string): Promise<void>
   const response = await fetch(url, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Nextinstock", avatar: "data:image/png;base64," + avatar.toString("base64") }),
+    body: JSON.stringify({ name: "Next", avatar: "data:image/png;base64," + avatar.toString("base64") }),
     signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) throw new Error("Discord could not set the webhook avatar (HTTP " + response.status + ").");

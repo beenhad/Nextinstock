@@ -128,8 +128,8 @@ function EbayListing({ phase, onAdvance }: { phase: number; onAdvance: () => voi
         <div className="ebay-details">
           <h3>Pokemon XD: Gale of Darkness (Nintendo GameCube, 2005) Japanese Complete Tested</h3>
           <div className="ebay-seller">
-            <span className="ebay-avatar">n</span>
-            <span><strong>nextinstock</strong> (2891)<br /><u>100% positive</u> · <u>Seller&apos;s other items</u></span>
+            <span className="ebay-avatar" aria-label="Next" />
+            <span><strong>next</strong> (2891)<br /><u>100% positive</u> · <u>Seller&apos;s other items</u></span>
           </div>
           <div className="ebay-price">US $84.99</div>
           <p className="ebay-payments">or 4 interest-free payments of $21.25 available with <strong>Klarna.</strong></p>
@@ -182,7 +182,7 @@ function ListingRow({ selected = false }: { selected?: boolean }) {
       <GamePhoto copy="current" />
       <div>
         <strong>Pokemon XD: Gale of Darkness</strong>
-        <span>eBay · 266994813467 · Good</span>
+        <span>eBay 900000000102 · Good</span>
       </div>
       <strong>$84.99</strong>
       <span className="story-status">{selected ? <><Check size={12} /> Selected</> : "Live"}</span>
@@ -203,7 +203,7 @@ function NextinstockPanel({ phase, onAdvance }: { phase: number; onAdvance: () =
         <div className="next-story-topbar">
           <div>
             <strong>{phase === 0 || phase >= 5 ? "Restock tasks" : "New restock task"}</strong>
-            <span>nextinstock · eBay synced</span>
+            <span>Next · eBay synced</span>
           </div>
           <span className="synced-pill"><Check size={12} /> Synced</span>
         </div>
@@ -269,7 +269,7 @@ function NextinstockPanel({ phase, onAdvance }: { phase: number; onAdvance: () =
               <div className="story-step-kicker">4 of 4 · Review</div>
               <h3>Activate the restock task</h3>
               <div className="live-review-handoff">
-                <div><span>eBay listing</span><GamePhoto copy="current" /><strong>Item 266994813467</strong></div>
+                <div><span>eBay listing</span><GamePhoto copy="current" /><strong>900000000102</strong></div>
                 <ArrowRight size={19} />
                 <div><span>First in queue</span><GamePhoto copy="next" /><strong>GC-PKXD-009</strong></div>
               </div>
@@ -284,7 +284,7 @@ function NextinstockPanel({ phase, onAdvance }: { phase: number; onAdvance: () =
               <div className="apply-ring" />
               <div>
                 <div className="story-step-kicker">Sale detected · 10:42:08 AM</div>
-                <h3>Applying Copy B to item 266994813467</h3>
+                <h3>Applying Copy B to the same listing</h3>
                 <div className="apply-checks">
                   <span><Check size={13} /> Quantity held at zero</span>
                   <span><Check size={13} /> 6 photos verified</span>
@@ -298,7 +298,7 @@ function NextinstockPanel({ phase, onAdvance }: { phase: number; onAdvance: () =
             <div className="next-success-state live-panel-enter">
               <span className="next-success-icon"><CircleCheck size={25} /></span>
               <div><span>Restock complete · 10:42:11 AM</span><h3>Copy B is live on eBay</h3><p>Photos and condition updated. Quantity restored to one.</p></div>
-              <div className="next-success-task"><GamePhoto copy="next" /><span><strong>Pokemon XD: Gale of Darkness</strong><small>Item 266994813467 · Copy B</small></span><span className="ready-pill"><Check size={11} /> Active</span></div>
+              <div className="next-success-task"><GamePhoto copy="next" /><span><strong>Pokemon XD: Gale of Darkness</strong><small>eBay 900000000102 · Copy B</small></span><span className="ready-pill"><Check size={11} /> Active</span></div>
             </div>
           )}
         </div>
@@ -310,25 +310,25 @@ function NextinstockPanel({ phase, onAdvance }: { phase: number; onAdvance: () =
 export function HeroScreenshot() {
   const listings = [
     {
-      itemId: "267268210473",
+      id: "final-fantasy",
       title: "Final Fantasy Collector Booster Box",
-      detail: "Magic: The Gathering",
+      detail: "Magic: The Gathering · 900000000101",
       image: "https://i.ebayimg.com/00/s/MTYwMFgxNjAw/z/Il0AAeSwhddoq6Q7/$_57.PNG?set_id=880000500F",
       status: "Ready to set up",
       statusClass: "is-eligible",
     },
     {
-      itemId: "267794532066",
-      title: "Resident Evil Medical Courier Bag",
-      detail: "AMC popcorn bucket",
-      image: "https://i.ebayimg.com/00/s/MTYwMFgxNjAw/z/txwAAeSwrwFqtWeK/$_57.PNG?set_id=880000500F",
+      id: "pokemon-xd",
+      title: "Pokémon XD: Gale of Darkness",
+      detail: "Nintendo GameCube · 900000000102",
+      image: "https://i.ebayimg.com/images/g/Xx8AAeSwHNVpYYFS/s-l1600.webp",
       status: "Ready to set up",
       statusClass: "is-eligible",
     },
     {
-      itemId: "267794710676",
+      id: "xbox-controller",
       title: "Xbox X25 Anniversary Controller",
-      detail: "Presale · stock review needed",
+      detail: "Controller · 900000000103",
       image: "https://i.ebayimg.com/00/s/OTAwWDkwMA==/z/R1AAAeSwBBdqtXRQ/$_57.JPG?set_id=880000500F",
       status: "Review stock",
       statusClass: "is-review",
@@ -352,20 +352,17 @@ export function HeroScreenshot() {
         </div>
         <div className="hero-shot-list" aria-label="Example eBay listings">
           {listings.map((listing) => (
-            <a
+            <div
               className="hero-shot-task"
-              href={`https://www.ebay.com/itm/${listing.itemId}`}
-              key={listing.itemId}
-              rel="noopener noreferrer"
-              target="_blank"
+              key={listing.id}
             >
               <img src={listing.image} alt="" referrerPolicy="no-referrer" />
               <span className="hero-shot-title">
                 <strong>{listing.title}</strong>
-                <small>{listing.detail} · eBay {listing.itemId}</small>
+                <small>{listing.detail}</small>
               </span>
               <span className={`hero-shot-status ${listing.statusClass}`}>{listing.status}</span>
-            </a>
+            </div>
           ))}
         </div>
       </div>
@@ -416,7 +413,7 @@ export function ProcessLoop() {
         <div className="browser-dots"><span /><span /><span /></div>
         <div className="process-tabs" role="tablist" aria-label="Sale and restock walkthrough">
           <button type="button" role="tab" aria-selected={activeTab === "nextinstock"} className={activeTab === "nextinstock" ? "active" : ""} onClick={() => setActiveTab("nextinstock")}>
-            <BrandMark compact /> Nextinstock
+            <BrandMark compact /> Next
           </button>
           <button type="button" role="tab" aria-selected={activeTab === "ebay"} className={activeTab === "ebay" ? "active" : ""} onClick={() => setActiveTab("ebay")}>
             <EbayWordmark /> Listing

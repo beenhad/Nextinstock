@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Nextinstock n">
-  <circle cx="256" cy="256" r="248" fill="#fff" stroke="#191919" stroke-width="14"/>
-  <text x="256" y="371" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="400" font-weight="700" letter-spacing="-24" fill="#3665f3">n</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Next</title>
+  <rect width="64" height="64" rx="15" fill="#fff"/>
+  <text x="0" y="46" transform="translate(3 0) scale(.7 1)" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700"><tspan fill="#3665f3">n</tspan><tspan fill="#e53238">e</tspan><tspan fill="#f5af02">x</tspan><tspan fill="#86b817">t</tspan></text>
 </svg>

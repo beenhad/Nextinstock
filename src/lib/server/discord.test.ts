@@ -59,7 +59,7 @@ test("worker alerts use product thumbnail, status color, and event timestamp", (
     remainingQueuedCopies: 0,
   };
   const payload = buildWorkerDiscordPayload(result, at);
-  assert.equal(payload?.username, "Nextinstock");
+  assert.equal(payload?.username, "Next");
   assert.equal(payload?.embeds?.[0].thumbnail?.url, listing.variations[0].imageUrls[0]);
   assert.equal(payload?.embeds?.[0].color, 0x2ea66f);
   assert.equal(payload?.embeds?.[0].timestamp, at.toISOString());

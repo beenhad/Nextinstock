@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-export function PurchaseButton({ enabled, price }: { enabled: boolean; price: string }) {
+export function PurchaseButton({ mode, price }: { mode: "live" | "test" | null; price: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function startCheckout() {
@@ -19,7 +19,7 @@ export function PurchaseButton({ enabled, price }: { enabled: boolean; price: st
     }
   }
   return <div className="purchase-action">
-    <button className="primary-link" type="button" disabled={!enabled || busy} onClick={() => void startCheckout()}>{enabled ? busy ? "Opening Stripe…" : `Buy Desktop — ${price}` : "Desktop coming soon"}</button>
+    <button className="primary-link" type="button" disabled={busy || !mode} onClick={() => void startCheckout()}>{busy ? "Opening Stripe…" : mode === "test" ? `Test Desktop checkout — ${price}` : mode === "live" ? `Buy Desktop — ${price}` : "Desktop checkout opening soon"}</button>
     {error && <small role="alert">{error}</small>}
   </div>;
 }
