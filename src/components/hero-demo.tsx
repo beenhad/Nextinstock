@@ -338,7 +338,7 @@ export function HeroScreenshot() {
   return (
     <div className="hero-shot-shell" aria-label="Nextinstock restock task overview">
       <div className="hero-shot-bar">
-        <BrandMark />
+        <BrandMark tag={false} />
         <div className="hero-shot-user">NI</div>
       </div>
       <div className="hero-shot-content">
