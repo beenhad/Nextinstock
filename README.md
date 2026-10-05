@@ -15,14 +15,16 @@ For multi-variation listings, choose the exact variation for each task. The setu
 
 ## Run it locally
 
-For the buyer download, follow [INSTALL_WITH_AI.md](INSTALL_WITH_AI.md). It creates a data directory outside the release folder so updates do not replace queued photos or the SQLite ledger. [DISCORD_SETUP.md](DISCORD_SETUP.md) covers optional channel alerts.
+For a guided setup with an AI assistant, follow [INSTALL_WITH_AI.md](INSTALL_WITH_AI.md). Setup creates a data directory outside the project folder so `git pull` never touches queued photos or the SQLite ledger. [DISCORD_SETUP.md](DISCORD_SETUP.md) covers optional channel alerts.
 
 ```bash
+git clone https://github.com/beenhad/Nextinstock.git
+cd Nextinstock
 npm ci
 npm run setup:local
 ```
 
-Enter your own eBay developer credentials in `.env.local`. Keep `NEXTINSTOCK_EBAY_WRITE_MODE=dry-run` while testing. The setup command places operational data in your user Library outside the release folder.
+Enter your own eBay developer credentials in `.env.local`. Keep `NEXTINSTOCK_EBAY_WRITE_MODE=dry-run` while testing. The setup command places operational data in your user Library outside the project folder.
 
 Build, then run the app and worker together:
 
@@ -90,9 +92,9 @@ npm audit --omit=dev
 
 The UI and API remain useful in dry-run mode: listing sync, task creation, local image persistence, sold-count checks, restock plans, activity history, and repeat-copy queuing all run without mutating eBay.
 
-## Release preparation
+## Website
 
-`npm run package:release` creates a source ZIP in `dist/` from an explicit file list. It excludes `.env.local`, `.nextinstock/`, dependencies, and build output. The public hosted build blocks local tool routes.
+The marketing site (`/` and `/docs`) deploys to Vercel. The hosted build blocks every local tool route (`/tool` and the task, eBay, photo, and settings APIs), so the tool only ever runs on your own machine.
 
 ## Contributing
 

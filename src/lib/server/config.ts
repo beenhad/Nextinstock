@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import path from "node:path";
-import { config as loadDotenv, parse } from "dotenv";
+import { config as loadDotenv } from "dotenv";
 import type { EbayWriteMode, SystemStatus } from "@/lib/types";
 
 loadDotenv({
@@ -8,28 +8,6 @@ loadDotenv({
   override: false,
   quiet: true,
 });
-
-const SELLERMAID_EBAY_KEYS = [
-  "EBAY_APP_ID",
-  "EBAY_CERT_ID",
-  "EBAY_REDIRECT_RU_NAME",
-  "EBAY_REFRESH_TOKEN",
-] as const;
-
-let sellerMaidEnvLoaded = false;
-
-function loadSellerMaidEnv() {
-  if (sellerMaidEnvLoaded) return;
-  sellerMaidEnvLoaded = true;
-
-  const file = process.env.SELLERMAID_ENV_FILE?.trim();
-  if (!file || !existsSync(file)) return;
-
-  const parsed = parse(readFileSync(file));
-  for (const key of SELLERMAID_EBAY_KEYS) {
-    if (!process.env[key] && parsed[key]) process.env[key] = parsed[key];
-  }
-}
 
 export function dataDirectory(): string {
   const configured = process.env.NEXTINSTOCK_DATA_DIR?.trim();
@@ -90,7 +68,6 @@ export function saveDiscordWebhookUrl(url: string | null) {
 }
 
 export function ebayCredentials() {
-  loadSellerMaidEnv();
   const local = readLocalSecrets();
   const appId = process.env.EBAY_APP_ID?.trim() ?? "";
   const certId = process.env.EBAY_CERT_ID?.trim() ?? "";
@@ -98,11 +75,9 @@ export function ebayCredentials() {
   const refreshToken = local.ebayRefreshToken?.trim() || process.env.EBAY_REFRESH_TOKEN?.trim() || "";
   const source = local.ebayRefreshToken
     ? "nextinstock"
-    : process.env.SELLERMAID_ENV_FILE
-      ? "sellermaid"
-      : refreshToken
-        ? "environment"
-        : "missing";
+    : refreshToken
+      ? "environment"
+      : "missing";
 
   return {
     appId,
@@ -110,7 +85,7 @@ export function ebayCredentials() {
     ruName,
     refreshToken,
     grantedScopes: local.ebayGrantedScopes ?? [],
-    source: source as "nextinstock" | "sellermaid" | "environment" | "missing",
+    source: source as "nextinstock" | "environment" | "missing",
   };
 }
 

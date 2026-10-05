@@ -10,7 +10,7 @@ Use the [Nextinstock Alerts Discord server template](https://discord.new/GavFccH
 | Webhook | Target `#restock-updates`; Nextinstock sets its name and blue `n` avatar when connected |
 | Members | Only people you choose to invite |
 
-After creating the server, use **Server Settings → Integrations → Webhooks → New Webhook**. Choose `#restock-updates` and copy the URL directly into Nextinstock Settings. Every buyer must create their own webhook. The URL is a secret; never put it in a server template or AI prompt.
+After creating the server, use **Server Settings → Integrations → Webhooks → New Webhook**. Choose `#restock-updates` and copy the URL directly into Nextinstock Settings. Every seller must create their own webhook. The URL is a secret; never put it in a server template or AI prompt.
 
 Nextinstock v1 posts to one channel. **Preview all alerts** shows nine simulated states: new sale, awaiting restock, restocking, restocked with another queued copy, restocked with no copy queued, restock on hold, dry-run, failure, and review needed. Real alerts include the sold-count trigger, stock counts, and next action. The webhook sends no Discord role mentions.
 

@@ -106,7 +106,7 @@ export interface ActivityEvent {
 
 export interface SystemStatus {
   ebayConfigured: boolean;
-  ebayCredentialSource: "nextinstock" | "sellermaid" | "environment" | "missing";
+  ebayCredentialSource: "nextinstock" | "environment" | "missing";
   writeMode: EbayWriteMode;
   storageDriver: "local";
   storagePath: string;
