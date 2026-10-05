@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
 import type { EbayWriteMode, SystemStatus } from "@/lib/types";
@@ -98,7 +98,15 @@ export function pollSeconds(): number {
   return Number.isFinite(configured) ? Math.max(15, Math.min(3600, Math.trunc(configured))) : 30;
 }
 
-export function restockDelaySeconds(): number {
+export const MIN_RESTOCK_DELAY_SECONDS = 15;
+export const MAX_RESTOCK_DELAY_SECONDS = 24 * 60 * 60;
+
+export function clampRestockDelay(value: number): number {
+  return Math.max(MIN_RESTOCK_DELAY_SECONDS, Math.min(MAX_RESTOCK_DELAY_SECONDS, Math.trunc(value)));
+}
+
+export function restockDelaySeconds(taskDelay?: number | null): number {
+  if (typeof taskDelay === "number" && Number.isFinite(taskDelay)) return clampRestockDelay(taskDelay);
   const configured = Number(process.env.NEXTINSTOCK_RESTOCK_DELAY_SECONDS ?? 60);
   return Number.isFinite(configured) ? Math.max(15, Math.min(900, Math.trunc(configured))) : 60;
 }

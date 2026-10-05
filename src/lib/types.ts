@@ -77,11 +77,21 @@ export interface QueuedCopy {
   createdAt: string;
 }
 
+/** How each queued copy's price moves away from the one before it. */
+export interface PriceRule {
+  mode: "amount" | "percent";
+  step: number;
+  cap: number | null;
+}
+
 export interface RestockTask {
   id: string;
   itemId: string;
   variationKey: string | null;
   status: TaskStatus;
+  /** Seconds to wait after a sale before restocking; null uses the app default. */
+  restockDelaySeconds: number | null;
+  priceRule: PriceRule | null;
   listing: ListingSnapshot;
   queuedCopy: QueuedCopy | null;
   queuedCopies: QueuedCopy[];

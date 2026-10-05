@@ -6,17 +6,17 @@ const steps = [
   {
     title: "Pick the listing", short: "Pick",
     summary: "Choose the live listing you keep restocking. On a variation listing, pick the exact color or option.",
-    video: "/demos/choose.mp4?v=5", webm: "/demos/choose.webm?v=5", poster: "/demos/choose.jpg?v=5", fit: "fill",
+    video: "/demos/choose.mp4?v=6", webm: "/demos/choose.webm?v=6", poster: "/demos/choose.jpg?v=6", fit: "fill",
   },
   {
     title: "Queue the next copies", short: "Queue",
-    summary: "Shoot each copy once. Give it photos, a condition note, and a price, then set the selling order.",
-    video: "/demos/prepare.mp4?v=5", webm: "/demos/prepare.webm?v=5", poster: "/demos/prepare.jpg?v=5", fit: "fill",
+    summary: "Give a copy its own photos, note, and price. Or add a stack of identical ones in one click.",
+    video: "/demos/prepare.mp4?v=6", webm: "/demos/prepare.webm?v=6", poster: "/demos/prepare.jpg?v=6", fit: "fill",
   },
   {
     title: "It restocks on its own", short: "Restock",
-    summary: "Reorder or reprice anytime. When one sells, Next swaps in the next copy and checks that eBay took it.",
-    video: "/demos/restock.mp4?v=5", webm: "/demos/restock.webm?v=5", poster: "/demos/restock.jpg?v=5", fit: "fill",
+    summary: "Drag to reorder, set a price that climbs each sale, pick the timing. Next handles the rest.",
+    video: "/demos/restock.mp4?v=6", webm: "/demos/restock.webm?v=6", poster: "/demos/restock.jpg?v=6", fit: "fill",
   },
   {
     title: "Get the ping", short: "Alert",

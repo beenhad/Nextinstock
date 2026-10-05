@@ -28,7 +28,7 @@ test("only one worker owns a task, and an expired lease can be recovered", async
   legacy.prepare("INSERT INTO copies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .run("legacy-copy", "legacy-task", "LEGACY", null, null, "Saved note", "queued", "2025-01-01", "2025-01-01");
   legacy.close();
-  const { acquireTaskLease, addQueuedCopy, completeHandoff, createTask, getOrCreateHandoffRun, getTask, moveQueuedCopy, pendingDiscordNotifications, queueDiscordNotification, recordDiscordDelivery, releaseTaskLease, removeQueuedCopy, renewTaskLease, scheduleHandoffRun, updateQueuedCopyDetails, updateQueuedCopyPrice, upsertListing } = await import("./database");
+  const { acquireTaskLease, addQueuedCopy, completeHandoff, createTask, getOrCreateHandoffRun, getTask, moveQueuedCopy, pendingDiscordNotifications, queueDiscordNotification, recordDiscordDelivery, releaseTaskLease, removeQueuedCopy, renewTaskLease, reorderQueuedCopies, scheduleHandoffRun, setQueuedCopyPrices, updateQueuedCopyDetails, updateTaskSettings, updateQueuedCopyPrice, upsertListing } = await import("./database");
   const snapshot: ListingSnapshot = {
     itemId: "123456789",
     sku: null,
@@ -100,11 +100,27 @@ test("only one worker owns a task, and an expired lease can be recovered", async
   updateQueuedCopyDetails(task.id, "copy-two", { internalReference: " COPY-2B ", conditionDescription: "Second copy, case cracked" });
   assert.equal(getTask(task.id)?.queuedCopies[2].internalReference, "COPY-2B");
   assert.equal(getTask(task.id)?.queuedCopies[2].conditionDescription, "Second copy, case cracked");
-  assert.throws(() => updateQueuedCopyDetails(task.id, "copy-two", { conditionDescription: "  " }), /condition note/);
+  // copy-two has no photos, so it is an identical copy: a blank note means "keep the listing's note".
+  assert.equal(updateQueuedCopyDetails(task.id, "copy-two", { conditionDescription: "  " }).queuedCopies[2].conditionDescription, "");
+  updateQueuedCopyDetails(task.id, "copy-two", { conditionDescription: "Second copy, case cracked" });
   addQueuedCopy({ taskId: task.id, copyId: "copy-four", snapshot, internalReference: "COPY-4", conditionDescription: "Fourth copy", targetPrice: null, images: [] });
   removeQueuedCopy(task.id, "copy-four");
   assert.deepEqual(getTask(task.id)?.queuedCopies.map((copy) => copy.internalReference), ["COPY-1", "COPY-3", "COPY-2B"]);
   assert.throws(() => removeQueuedCopy(task.id, "copy-four"), /not found/);
+  addQueuedCopy({ taskId: task.id, copyId: "copy-same", snapshot, internalReference: "SAME", conditionDescription: "", targetPrice: null, images: [] });
+  updateQueuedCopyDetails(task.id, "copy-same", { internalReference: "SAME-A" });
+  const reordered = reorderQueuedCopies(task.id, ["copy-same", "copy-one", "copy-two", "copy-three"].filter((id) => getTask(task.id)?.queuedCopies.some((copy) => copy.id === id)));
+  assert.equal(reordered.queuedCopies[0].internalReference, "SAME-A");
+  assert.throws(() => reorderQueuedCopies(task.id, ["copy-same"]), /queue changed/);
+  const repriced = setQueuedCopyPrices(task.id, reordered.queuedCopies.map((copy, index) => ({ copyId: copy.id, targetPrice: 30 + index })));
+  assert.deepEqual(repriced.queuedCopies.map((copy) => copy.targetPrice), reordered.queuedCopies.map((_, index) => 30 + index));
+  const configured = updateTaskSettings(task.id, { restockDelaySeconds: 5, priceRule: { mode: "amount", step: 2, cap: 60 } });
+  assert.equal(configured.restockDelaySeconds, 15);
+  assert.deepEqual(configured.priceRule, { mode: "amount", step: 2, cap: 60 });
+  assert.equal(updateTaskSettings(task.id, { priceRule: null, restockDelaySeconds: null }).priceRule, null);
+  assert.throws(() => updateTaskSettings(task.id, { priceRule: { mode: "percent", step: 500, cap: null } }), /out of range/);
+  for (const copy of getTask(task.id)!.queuedCopies.filter((candidate) => candidate.id !== "copy-one" && candidate.id !== "copy-three" && candidate.id !== "copy-two")) removeQueuedCopy(task.id, copy.id);
+  reorderQueuedCopies(task.id, ["copy-one", "copy-three", "copy-two"].filter((id) => getTask(task.id)?.queuedCopies.some((copy) => copy.id === id)));
   completeHandoff({ taskId: task.id, copyId: "copy-one", runId: run.id, snapshot: { ...snapshot, quantitySold: 1, quantityAvailable: 1 } });
   assert.equal(getTask(task.id)?.queuedCopy?.internalReference, "COPY-3");
   assert.equal(getTask(task.id)?.status, "active");

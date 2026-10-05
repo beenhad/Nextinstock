@@ -41,11 +41,11 @@ export async function POST(request: Request) {
     if (!listing.variations.length && variationKey) {
       return NextResponse.json({ error: "This listing has no variations" }, { status: 400 });
     }
-    if (!variationKey && !conditionDescription) {
-      return NextResponse.json({ error: "Add the exact condition note for this copy" }, { status: 400 });
+    if (!variationKey && files.length && !conditionDescription) {
+      return NextResponse.json({ error: "Add the condition note for this copy" }, { status: 400 });
     }
-    if (!variationKey && !files.length) {
-      return NextResponse.json({ error: "Add at least one photo" }, { status: 400 });
+    if (!variationKey && !files.length && !listing.imageUrls.length) {
+      return NextResponse.json({ error: "This listing has no photos to reuse. Add photos for this copy." }, { status: 400 });
     }
     const taskId = randomUUID();
     const copyId = randomUUID();
