@@ -147,7 +147,7 @@ export default function HomePage() {
           <div className="seller-stories-heading">
             <div>
               <span className="section-kicker">How sellers run it</span>
-              <h2>Same tool. Three kinds of shelf.</h2>
+              <h2>Three kinds of shelf.</h2>
             </div>
           </div>
           <div className="seller-stories-grid">

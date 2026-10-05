@@ -99,12 +99,12 @@ textarea:focus-visible {
 .brand-word { display: inline; }
 .brand-tag {
   display: inline-block;
-  margin-left: .1em;
+  margin-left: .14em;
   color: #3a3d45;
   font-size: .3em;
   font-weight: 700;
   letter-spacing: .02em;
-  line-height: .98;
+  line-height: 1.04;
   vertical-align: baseline;
 }
 .brand-tag span { display: block; }
@@ -4349,6 +4349,7 @@ textarea:focus-visible {
   transition: max-height .3s ease, opacity .2s ease;
 }
 .steps-tab.is-active .steps-tab-copy small { max-height: 120px; opacity: 1; transition: max-height .35s ease, opacity .25s ease .05s; }
+.steps-tab-short { display: none; }
 .steps-mobile-caption { display: none; margin: 0; color: #4a4d55; font-size: 15px; line-height: 1.5; }
 .steps-tab-progress { position: absolute; left: 14px; right: 16px; bottom: 8px; height: 2px; overflow: hidden; border-radius: 2px; background: transparent; }
 .steps-tab.is-active .steps-tab-progress { background: #e4e8f3; }
@@ -4418,11 +4419,15 @@ textarea:focus-visible {
   .steps-tab-copy strong { font-size: 13px; }
   .steps-tab-copy small { display: none; }
   .steps-tab-progress { left: 10px; right: 10px; bottom: 6px; }
-  .steps-stage { order: 1; aspect-ratio: 4 / 3; border-radius: 16px; }
-  .steps-stage-surface { padding: 14px; }
+  .steps-stage { order: 1; aspect-ratio: 16 / 11; border-radius: 16px; }
+  .steps-stage-surface { padding: 10px; }
+  .steps-video { border-radius: 8px; }
+  .steps-tab-full { display: none; }
+  .steps-tab-short { display: inline; }
   .steps-mobile-caption { display: block; order: 3; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .deal-bar-dot::after, .deal-bar-fill, .deal-bar-fill::after, .steps-video { animation: none; }
 }
+
