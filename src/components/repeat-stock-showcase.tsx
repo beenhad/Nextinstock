@@ -50,7 +50,7 @@ export function RepeatStockShowcase() {
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (playing) void video.play().catch(() => setPlaying(false));
+    if (playing) void video.play().catch(() => undefined);
     else video.pause();
   }, [activeIndex, playing]);
 
@@ -99,7 +99,7 @@ export function RepeatStockShowcase() {
           poster={step.poster}
           muted
           playsInline
-          preload="metadata"
+          preload="none"
           aria-hidden="true"
           onTimeUpdate={(event) => { const v = event.currentTarget; if (v.duration) setProgress(v.currentTime / v.duration); }}
           onEnded={handleEnded}
