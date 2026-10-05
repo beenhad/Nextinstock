@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { FaGithub } from "react-icons/fa";
+import { REPO_URL } from "@/lib/site";
 import { BrandMark } from "./brand-mark";
 
 export function SiteHeader() {
@@ -10,11 +12,11 @@ export function SiteHeader() {
         </Link>
         <nav className="site-nav" aria-label="Main navigation">
           <a href="/#how-it-works">How it works</a>
-          <a href="/#seller-story">Sellers</a>
-          <a href="/#pricing">Pricing</a>
+          <a href="/#sellers">Sellers</a>
+          <a href="/#open-source">Open source</a>
           <Link href="/docs">Docs</Link>
         </nav>
-        <a className="header-tool-link" href="/#pricing">Get Desktop</a>
+        <a className="header-tool-link" href={REPO_URL} target="_blank" rel="noreferrer"><FaGithub size={16} aria-hidden="true" /> GitHub</a>
       </div>
     </header>
   );

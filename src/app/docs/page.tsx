@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { ArrowRight, ExternalLink, LaptopMinimal } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { SiteHeader } from "@/components/site-header";
+import { REPO_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: "Desktop setup docs — Nextinstock",
+  title: "Setup guide: Next in stock",
   description: "Install Nextinstock on a Mac, connect eBay, prepare a restock task, and set up optional Discord alerts.",
 };
 
@@ -26,7 +27,7 @@ export default function DocsPage() {
       <p>Install Nextinstock, connect your eBay account, and prepare your first restock. Discord alerts are optional.</p>
       <div className="docs-hero-actions">
         <a href="#install" className="primary-link">Start setup <ArrowRight size={16} aria-hidden="true" /></a>
-        <a href="/#pricing" className="docs-text-link">See Desktop pricing</a>
+        <a href={REPO_URL} className="docs-text-link" target="_blank" rel="noreferrer">View the repo on GitHub</a>
       </div>
     </div>
 
@@ -37,13 +38,13 @@ export default function DocsPage() {
       </nav>
 
       <div className="docs-content">
-        <div className="docs-callout"><strong>Before you start</strong><p>Desktop runs locally on macOS. You need a Mac, Node.js 22 or newer, an eBay seller account, and your own eBay developer credentials. Keep the Mac awake and connected while monitoring.</p></div>
+        <div className="docs-callout"><strong>Before you start</strong><p>Next runs locally on macOS. You need a Mac, Node.js 22 or newer, an eBay seller account, and your own eBay developer credentials. Keep the Mac awake and connected while monitoring.</p></div>
 
         <section className="docs-section" id="install">
           <span className="docs-step">01 / INSTALL</span>
           <h2>Install on your Mac</h2>
-          <p>Extract the Desktop ZIP to a folder you can keep. Open Terminal in that folder and run:</p>
-          <pre><code>npm ci{"\n"}npm run setup:local</code></pre>
+          <p>Clone the repository to a folder you can keep. Open Terminal and run:</p>
+          <pre><code>git clone {REPO_URL}.git{"\n"}cd Nextinstock{"\n"}npm ci{"\n"}npm run setup:local</code></pre>
           <p><code>setup:local</code> creates a private <code>.env.local</code> file and stores the task ledger, photos, and secrets in <code>~/Library/Application Support/Nextinstock</code>. Keep that data folder when you update the software.</p>
         </section>
 
@@ -97,7 +98,7 @@ export default function DocsPage() {
         <section className="docs-section" id="updates">
           <span className="docs-step">06 / KEEP IT RUNNING</span>
           <h2>Updates and help</h2>
-          <p>Before installing a newer release, stop Nextinstock and back up <code>.env.local</code> plus the data folder shown in Settings. Extract the new ZIP into a new folder, carry over only <code>.env.local</code>, then run <code>npm ci</code> and <code>npm run build</code> before restarting. The separate data folder keeps your tasks and photos.</p>
+          <p>Before installing a newer release, stop Nextinstock and back up <code>.env.local</code> plus the data folder shown in Settings. Run <code>git pull</code> in the project folder, then <code>npm ci</code> and <code>npm run build</code> before restarting. <code>.env.local</code> is ignored by git, so your keys stay put. The separate data folder keeps your tasks and photos.</p>
           <p>If a listing is rejected or a restock stops, check <strong>Settings</strong> for the write gate and <strong>Activity</strong> for the latest result. The local tool also has <strong>Support &amp; docs</strong> with listing rules and status explanations.</p>
         </section>
       </div>
@@ -107,7 +108,7 @@ export default function DocsPage() {
       <div className="site-container docs-footer">
         <BrandMark />
         <span>Independent software for eBay sellers. Not affiliated with eBay.</span>
-        <a href="/#pricing">See Desktop <ArrowRight size={15} aria-hidden="true" /></a>
+        <a href={REPO_URL} target="_blank" rel="noreferrer">GitHub <ArrowRight size={15} aria-hidden="true" /></a>
       </div>
     </footer>
   </main>;

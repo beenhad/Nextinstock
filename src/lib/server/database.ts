@@ -701,6 +701,70 @@ export function updateQueuedCopyPrice(taskId: string, copyId: string, targetPric
   return updated;
 }
 
+function assertQueueEditable(db: ReturnType<typeof database>, taskId: string, timestamp: string, lockScheduled: boolean) {
+  const task = db.prepare("SELECT status, variation_key, lease_owner, lease_expires_at FROM restock_tasks WHERE id = ?").get(taskId) as Record<string, unknown> | undefined;
+  if (!task) throw new Error("Restock task not found");
+  if (task.lease_owner && asString(task.lease_expires_at) > timestamp) throw new Error("Wait for the current restock check to finish");
+  if (lockScheduled && asString(task.status) === "scheduled") throw new Error("Queue is locked during a restock handoff");
+  return { variationKey: task.variation_key ? asString(task.variation_key) : null };
+}
+
+export function updateQueuedCopyDetails(
+  taskId: string,
+  copyId: string,
+  input: { internalReference?: string; conditionDescription?: string },
+): RestockTask {
+  const reference = input.internalReference?.trim();
+  const note = input.conditionDescription?.trim();
+  if (reference !== undefined && (reference.length < 1 || reference.length > 100)) throw new Error("Internal reference must be 1 to 100 characters");
+  if (note !== undefined && note.length > 1000) throw new Error("Condition note must be 1,000 characters or fewer");
+  if (reference === undefined && note === undefined) throw new Error("Nothing to update");
+  const db = database();
+  const timestamp = now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const { variationKey } = assertQueueEditable(db, taskId, timestamp, false);
+    if (!variationKey && note === "") throw new Error("Add the exact condition note");
+    const result = db.prepare(`
+      UPDATE copies SET
+        internal_reference = COALESCE(?, internal_reference),
+        condition_description = COALESCE(?, condition_description),
+        updated_at = ?
+      WHERE id = ? AND task_id = ? AND status = 'queued'
+    `).run(reference ?? null, note ?? null, timestamp, copyId, taskId);
+    if (result.changes !== 1) throw new Error("Queued copy not found or already in use");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  const updated = getTask(taskId);
+  if (!updated) throw new Error("Restock task not found");
+  return updated;
+}
+
+export function removeQueuedCopy(taskId: string, copyId: string): RestockTask {
+  const db = database();
+  const timestamp = now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    assertQueueEditable(db, taskId, timestamp, true);
+    const result = db.prepare(`
+      UPDATE copies SET status = 'archived', queue_position = NULL, updated_at = ?
+      WHERE id = ? AND task_id = ? AND status = 'queued'
+    `).run(timestamp, copyId, taskId);
+    if (result.changes !== 1) throw new Error("Queued copy not found or already in use");
+    appendActivity({ taskId, type: "queued_copy_removed", level: "info", message: "Queued copy removed", details: { copyId } });
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  const updated = getTask(taskId);
+  if (!updated) throw new Error("Restock task not found");
+  return updated;
+}
+
 export function moveQueuedCopy(taskId: string, copyId: string, direction: "up" | "down"): RestockTask {
   const db = database();
   const timestamp = now();
