@@ -10,11 +10,11 @@ export function SiteHeader() {
         </Link>
         <nav className="site-nav" aria-label="Main navigation">
           <a href="/#how-it-works">How it works</a>
-          <a href="/#seller-story">Seller story</a>
+          <a href="/#seller-story">Sellers</a>
           <a href="/#pricing">Pricing</a>
           <Link href="/docs">Docs</Link>
         </nav>
-        <a className="header-tool-link" href="/#pricing">See Desktop</a>
+        <a className="header-tool-link" href="/#pricing">Get Desktop</a>
       </div>
     </header>
   );
