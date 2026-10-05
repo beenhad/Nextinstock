@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Next</title>
   <rect width="64" height="64" rx="15" fill="#fff"/>
-  <text x="0" y="46" transform="translate(3 0) scale(.7 1)" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700"><tspan fill="#3665f3">n</tspan><tspan fill="#e53238">e</tspan><tspan fill="#f5af02">x</tspan><tspan fill="#86b817">t</tspan></text>
+  <path d="M20 47V25m0 11c0-7 5-11 12-11 8 0 12 5 12 13v9" fill="none" stroke="#3665f3" stroke-width="9" stroke-linecap="square" stroke-linejoin="round"/>
 </svg>

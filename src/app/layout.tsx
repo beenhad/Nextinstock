@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "@ebay/skin/index.css";
 import "./globals.css";
+import { FaviconCycle } from "@/components/favicon-cycle";
 
 export const metadata: Metadata = {
   title: "Next — Restock less. Keep selling.",
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body><FaviconCycle />{children}</body>
     </html>
   );
 }

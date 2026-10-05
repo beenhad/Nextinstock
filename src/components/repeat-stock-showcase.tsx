@@ -6,7 +6,7 @@ const steps = [
   { title: "Choose the listing", summary: "Find the listing you want to keep selling from.", video: "/demos/choose.mp4?v=4", webm: "/demos/choose.webm?v=4", poster: "/demos/choose.jpg?v=4", frame: "wide" },
   { title: "Prepare the next copy", summary: "Add its photos, condition, and price ahead of time.", video: "/demos/prepare-detail.mp4?v=1", webm: "", poster: "/demos/prepare-detail.jpg?v=1", frame: "medium" },
   { title: "Restock after the sale", summary: "See the next copy go live on the same listing.", video: "/demos/restock.mp4?v=4", webm: "/demos/restock.webm?v=4", poster: "/demos/restock.jpg?v=4", frame: "wide" },
-  { title: "See it in Discord", summary: "Get sale and restock updates in your channel.", video: "/demos/discord-detail.mp4?v=2", webm: "", poster: "/demos/discord-detail.jpg?v=2", frame: "compact" },
+  { title: "See it in Discord", summary: "Get sale and restock updates in your channel.", video: "/demos/discord-detail.mp4?v=3", webm: "", poster: "/demos/discord-detail.jpg?v=2", frame: "compact" },
 ] as const;
 
 export function RepeatStockShowcase() {
