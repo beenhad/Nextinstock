@@ -4,7 +4,7 @@ import "./globals.css";
 import { FaviconCycle } from "@/components/favicon-cycle";
 
 export const metadata: Metadata = {
-  title: "Next — Restock less. Keep selling.",
+  title: "Next in stock: restock the same eBay listing after it sells",
   description:
     "Queue the next copy. Restock the same eBay listing after it sells.",
 };

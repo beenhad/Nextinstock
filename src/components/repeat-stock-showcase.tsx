@@ -4,22 +4,22 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 const steps = [
   {
-    title: "Pick the listing",
+    title: "Pick the listing", short: "Pick",
     summary: "Choose the live listing you keep restocking. On a variation listing, pick the exact color or option.",
     video: "/demos/choose.mp4?v=4", webm: "/demos/choose.webm?v=4", poster: "/demos/choose.jpg?v=4",
   },
   {
-    title: "Queue the next copies",
+    title: "Queue the next copies", short: "Queue",
     summary: "Shoot each copy once. Give it photos, a condition note, and a price, then set the selling order.",
     video: "/demos/prepare-detail.mp4?v=1", webm: "", poster: "/demos/prepare-detail.jpg?v=1",
   },
   {
-    title: "It restocks on its own",
+    title: "It restocks on its own", short: "Restock",
     summary: "When one sells, Next swaps in the next copy, checks that eBay took it, and puts one back up for sale.",
     video: "/demos/restock.mp4?v=4", webm: "/demos/restock.webm?v=4", poster: "/demos/restock.jpg?v=4",
   },
   {
-    title: "Get the ping",
+    title: "Get the ping", short: "Alert",
     summary: "Every sale and restock posts to your Discord, so you know it happened without opening eBay.",
     video: "/demos/discord-detail.mp4?v=3", webm: "", poster: "/demos/discord-detail.jpg?v=2",
   },
@@ -85,7 +85,7 @@ export function RepeatStockShowcase() {
         const state = index === activeIndex ? "is-active" : index < activeIndex ? "is-done" : "";
         return <button type="button" role="tab" id={`steps-tab-${index}`} aria-controls="steps-panel" aria-selected={activeIndex === index} tabIndex={activeIndex === index ? 0 : -1} className={`steps-tab ${state}`} key={item.title} onClick={() => select(index, true)}>
           <span className="steps-tab-index">0{index + 1}</span>
-          <span className="steps-tab-copy"><strong>{item.title}</strong><small>{item.summary}</small></span>
+          <span className="steps-tab-copy"><strong><span className="steps-tab-full">{item.title}</span><span className="steps-tab-short">{item.short}</span></strong><small>{item.summary}</small></span>
           <span className="steps-tab-progress" aria-hidden="true"><span style={{ transform: `scaleX(${index === activeIndex ? progress : index < activeIndex ? 1 : 0})` }} /></span>
         </button>;
       })}
