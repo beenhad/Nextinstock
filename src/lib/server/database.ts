@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  PriceRule,
   ActivityEvent,
   ListingSnapshot,
   QueuedCopy,
@@ -9,7 +10,7 @@ import type {
   TaskPhoto,
   TaskStatus,
 } from "@/lib/types";
-import { dataDirectory } from "./config";
+import { clampRestockDelay, dataDirectory } from "./config";
 import { assertTargetPrice } from "./price";
 import type { StoredImage } from "./storage";
 
@@ -202,6 +203,13 @@ function database(): DatabaseSync {
   if (!handoffColumns.some((column) => column.name === "execute_after")) {
     db.exec("ALTER TABLE handoff_runs ADD COLUMN execute_after TEXT");
   }
+  const settingsColumns = db.prepare("PRAGMA table_info(restock_tasks)").all() as Array<{ name?: string }>;
+  if (!settingsColumns.some((column) => column.name === "restock_delay_seconds")) {
+    db.exec("ALTER TABLE restock_tasks ADD COLUMN restock_delay_seconds INTEGER");
+  }
+  if (!settingsColumns.some((column) => column.name === "price_rule_json")) {
+    db.exec("ALTER TABLE restock_tasks ADD COLUMN price_rule_json TEXT");
+  }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS restock_tasks_item_variation_idx ON restock_tasks(item_id, variation_key)");
   instance = db;
   return db;
@@ -386,6 +394,8 @@ function taskFromRow(row: Record<string, unknown>): RestockTask {
     itemId: asString(row.item_id),
     variationKey: asNullableString(row.variation_key),
     status: asString(row.task_status) as TaskStatus,
+    restockDelaySeconds: row.restock_delay_seconds === null || row.restock_delay_seconds === undefined ? null : asNumber(row.restock_delay_seconds),
+    priceRule: row.price_rule_json ? parseJson<PriceRule | null>(row.price_rule_json, null) : null,
     listing,
     queuedCopy: queuedCopies[0] ?? null,
     queuedCopies,
@@ -404,6 +414,8 @@ const TASK_SELECT = `
     t.id AS task_id,
     t.variation_key,
     t.status AS task_status,
+    t.restock_delay_seconds,
+    t.price_rule_json,
     t.armed_quantity_sold,
     t.last_seen_quantity_sold,
     t.last_seen_quantity_available,
@@ -724,7 +736,8 @@ export function updateQueuedCopyDetails(
   db.exec("BEGIN IMMEDIATE");
   try {
     const { variationKey } = assertQueueEditable(db, taskId, timestamp, false);
-    if (!variationKey && note === "") throw new Error("Add the exact condition note");
+    const hasPhotos = Boolean(db.prepare("SELECT 1 FROM photos WHERE copy_id = ? LIMIT 1").get(copyId));
+    if (!variationKey && hasPhotos && note === "") throw new Error("Add the exact condition note");
     const result = db.prepare(`
       UPDATE copies SET
         internal_reference = COALESCE(?, internal_reference),
@@ -755,6 +768,96 @@ export function removeQueuedCopy(taskId: string, copyId: string): RestockTask {
     `).run(timestamp, copyId, taskId);
     if (result.changes !== 1) throw new Error("Queued copy not found or already in use");
     appendActivity({ taskId, type: "queued_copy_removed", level: "info", message: "Queued copy removed", details: { copyId } });
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  const updated = getTask(taskId);
+  if (!updated) throw new Error("Restock task not found");
+  return updated;
+}
+
+export function validatePriceRule(rule: PriceRule | null): PriceRule | null {
+  if (rule === null) return null;
+  if (rule.mode !== "amount" && rule.mode !== "percent") throw new Error("Price rule must step by an amount or a percent");
+  const step = Number(rule.step);
+  if (!Number.isFinite(step) || Math.abs(step) > (rule.mode === "percent" ? 100 : 100000)) throw new Error("Price step is out of range");
+  const cap = rule.cap === null || rule.cap === undefined ? null : Number(rule.cap);
+  if (cap !== null && (!Number.isFinite(cap) || cap <= 0)) throw new Error("Price cap must be a positive number");
+  return { mode: rule.mode, step: Math.round(step * 100) / 100, cap: cap === null ? null : Math.round(cap * 100) / 100 };
+}
+
+export function updateTaskSettings(
+  taskId: string,
+  input: { restockDelaySeconds?: number | null; priceRule?: PriceRule | null },
+): RestockTask {
+  const db = database();
+  const sets: string[] = [];
+  const values: Array<string | number | null> = [];
+  if (input.restockDelaySeconds !== undefined) {
+    const delay = input.restockDelaySeconds;
+    if (delay !== null && !Number.isFinite(Number(delay))) throw new Error("Restock delay must be a number of seconds");
+    sets.push("restock_delay_seconds = ?");
+    values.push(delay === null ? null : clampRestockDelay(Number(delay)));
+  }
+  if (input.priceRule !== undefined) {
+    const rule = validatePriceRule(input.priceRule);
+    sets.push("price_rule_json = ?");
+    values.push(rule ? JSON.stringify(rule) : null);
+  }
+  if (!sets.length) throw new Error("Nothing to update");
+  const result = db.prepare(`UPDATE restock_tasks SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`).run(...values, now(), taskId);
+  if (result.changes !== 1) throw new Error("Restock task not found");
+  const updated = getTask(taskId);
+  if (!updated) throw new Error("Restock task not found");
+  return updated;
+}
+
+/** Replace the order of every queued copy at once (drag-and-drop). */
+export function reorderQueuedCopies(taskId: string, copyIds: string[]): RestockTask {
+  const db = database();
+  const timestamp = now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const task = db.prepare("SELECT status, lease_owner, lease_expires_at FROM restock_tasks WHERE id = ?").get(taskId) as Record<string, unknown> | undefined;
+    if (!task) throw new Error("Restock task not found");
+    if (asString(task.status) === "scheduled" || (task.lease_owner && asString(task.lease_expires_at) > timestamp)) {
+      throw new Error("Queue order is locked during a restock handoff");
+    }
+    const rows = db.prepare("SELECT id FROM copies WHERE task_id = ? AND status = 'queued'").all(taskId) as Record<string, unknown>[];
+    const current = new Set(rows.map((row) => asString(row.id)));
+    if (copyIds.length !== current.size || new Set(copyIds).size !== copyIds.length || copyIds.some((id) => !current.has(id))) {
+      throw new Error("The queue changed. Refresh and try again.");
+    }
+    const update = db.prepare("UPDATE copies SET queue_position = ?, updated_at = ? WHERE id = ? AND task_id = ?");
+    copyIds.forEach((id, index) => update.run(index + 1, timestamp, id, taskId));
+    appendActivity({ taskId, type: "queued_copy_moved", level: "info", message: "Queued copy order changed", details: { copyIds } });
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  const updated = getTask(taskId);
+  if (!updated) throw new Error("Restock task not found");
+  return updated;
+}
+
+/** Set several queued prices in one transaction (used when a price rule is applied). */
+export function setQueuedCopyPrices(taskId: string, prices: Array<{ copyId: string; targetPrice: number | null }>): RestockTask {
+  const db = database();
+  const timestamp = now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const task = db.prepare("SELECT lease_owner, lease_expires_at FROM restock_tasks WHERE id = ?").get(taskId) as Record<string, unknown> | undefined;
+    if (!task) throw new Error("Restock task not found");
+    if (task.lease_owner && asString(task.lease_expires_at) > timestamp) throw new Error("Wait for the current restock check to finish");
+    const update = db.prepare("UPDATE copies SET target_price = ?, updated_at = ? WHERE id = ? AND task_id = ? AND status = 'queued'");
+    for (const entry of prices) {
+      const result = update.run(assertTargetPrice(entry.targetPrice), timestamp, entry.copyId, taskId);
+      if (result.changes !== 1) throw new Error("Queued copy not found or already in use");
+    }
+    appendActivity({ taskId, type: "queued_price_updated", level: "info", message: `Repriced ${prices.length} queued ${prices.length === 1 ? "copy" : "copies"}`, details: { count: prices.length } });
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

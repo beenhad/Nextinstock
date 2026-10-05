@@ -21,9 +21,11 @@ export function fixtureData(base) {
     copy(1, "GC-PKXD-009", "Complete in box. Disc tested.", 84.99, next),
     copy(2, "GC-PKXD-010", "Case has a small crack on the back. Disc clean.", 79.99, current),
     copy(3, "GC-PKXD-011", "No manual. Disc light scratches, tested.", 69.99, next),
+    { ...copy(4, "PKXD-SAME-1", "", 86.99, next), photos: [] },
+    { ...copy(5, "PKXD-SAME-2", "", 88.99, next), photos: [] },
   ];
   const task = {
-    id: "demo-task", itemId: listing.itemId, variationKey: null, status: "active", listing,
+    id: "demo-task", itemId: listing.itemId, variationKey: null, status: "active", restockDelaySeconds: null, priceRule: null, listing,
     queuedCopy: copies[0], queuedCopies: copies, armedQuantitySold: 8, lastSeenQuantitySold: 8,
     lastSeenQuantityAvailable: 1, lastCheckedAt: now, lastError: null, createdAt: now, updatedAt: now,
   };
@@ -49,6 +51,36 @@ export function installFixtureApi(page, base, { latencyMs = 120, initialTasks } 
     } });
     if (path === "/api/ebay/profile") return json(route, { profile: { userId: "Demo seller", avatarUrl: null, profileUrl: "" } });
     if (path === "/api/ebay/listings") { await wait(400); return json(route, { listing: data.listing }); }
+    const taskMatch = path.match(/^\/api\/tasks\/([^/]+)$/);
+    if (taskMatch && method === "PATCH") {
+      await wait(latencyMs);
+      const task = tasks.find((t) => t.id === taskMatch[1]);
+      const body = request.postDataJSON();
+      if (body.restockDelaySeconds !== undefined) task.restockDelaySeconds = body.restockDelaySeconds;
+      if (body.priceRule !== undefined) task.priceRule = body.priceRule;
+      if (body.order) task.queuedCopies = body.order.map((id) => task.queuedCopies.find((c) => c.id === id));
+      if (body.prices) for (const entry of body.prices) { const c = task.queuedCopies.find((x) => x.id === entry.copyId); c.targetPrice = entry.targetPrice === null ? null : Number(entry.targetPrice); }
+      reorder(task);
+      return json(route, { task });
+    }
+    const addMatch = path.match(/^\/api\/tasks\/([^/]+)\/copies$/);
+    if (addMatch && method === "POST") {
+      await wait(latencyMs);
+      const task = tasks.find((t) => t.id === addMatch[1]);
+      const text = request.postData() ?? "";
+      const field = (name) => (text.match(new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r]*)`)) ?? [])[1];
+      const count = Number(field("count") ?? 1);
+      const prices = field("prices") ? JSON.parse(field("prices")) : [];
+      const start = Number(field("startIndex") ?? 1);
+      for (let i = 0; i < count; i += 1) {
+        const n = task.queuedCopies.length + 100 + i;
+        task.queuedCopies.push({ id: `copy-${n}`, taskId: task.id, queuePosition: n, internalReference: `${field("internalReference")}-${start + i}`,
+          targetPrice: prices[i] === null || prices[i] === undefined ? null : Number(prices[i]), conditionId: "3000", conditionName: "Good",
+          conditionDescription: "", status: "queued", createdAt: new Date().toISOString(), photos: [] });
+      }
+      reorder(task);
+      return json(route, { task }, 201);
+    }
     const copyMatch = path.match(/^\/api\/tasks\/([^/]+)\/copies\/([^/]+)$/);
     if (copyMatch) {
       await wait(latencyMs);

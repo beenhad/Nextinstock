@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ListingSnapshot, RestockTask } from "@/lib/types";
-import { appliedCopyMatches, buildRestockPlan, restockWindowDue, stageAndPublishCopy } from "./restock-worker";
+import { appliedCopyMatches, buildRestockPlan, effectiveCopyContent, restockWindowDue, stageAndPublishCopy } from "./restock-worker";
 
 const listing = {
   quantityAvailable: 1,
@@ -75,7 +75,7 @@ test("variation plan reads the selected option and leaves buyer-facing photos an
   const variation = { key: "orange", sku: null, specifics: [{ name: "Colors", value: "Spice Orange" }], label: "Colors: Spice Orange", price: 59.99, currency: "USD", quantityTotal: 70, quantitySold: 70, quantityAvailable: 0, imageUrls: ["https://i.ebayimg.com/orange.jpg"], hasSpecificPhotos: true };
   const snapshot = { ...listing, variations: [variation], unsupportedReasons: [], quantitySold: 683, quantityAvailable: 152 } as ListingSnapshot;
   const task: RestockTask = {
-    id: "orange-task", itemId: "900000000201", variationKey: "orange", status: "active",
+    id: "orange-task", itemId: "900000000201", variationKey: "orange", status: "active", restockDelaySeconds: null, priceRule: null,
     armedQuantitySold: 70, lastSeenQuantitySold: 70, lastSeenQuantityAvailable: 0,
     lastCheckedAt: null, lastError: null, createdAt: "2026-10-02", updatedAt: "2026-10-02",
     listing: snapshot,
@@ -95,4 +95,31 @@ test("variation plan reads the selected option and leaves buyer-facing photos an
   assert.equal(plan.copy?.targetPrice, 64.99);
   assert.equal(plan.mutation.revisePrice, true);
   assert.equal(plan.blockers.some((blocker) => /photo|condition note|policy/i.test(blocker)), false);
+});
+
+test("an identical copy keeps the live photos and condition note and only reprices", () => {
+  const same = effectiveCopyContent({ photos: [], conditionDescription: "" }, listing);
+  assert.equal(same.reusesListingPhotos, true);
+  assert.deepEqual(same.listingPictureUrls, pictures);
+  assert.equal(same.conditionDescription, note);
+  const distinct = effectiveCopyContent({ photos: [{}], conditionDescription: "Cracked case" }, listing);
+  assert.equal(distinct.reusesListingPhotos, false);
+  assert.equal(distinct.conditionDescription, "Cracked case");
+});
+
+test("plan for an identical single-item copy skips photo upload", () => {
+  const snapshot = { ...listing, variations: [], unsupportedReasons: [], quantitySold: 3, quantityAvailable: 0, itemId: "900000000301" } as unknown as ListingSnapshot;
+  const copy = { id: "same-1", taskId: "same-task", queuePosition: 1, internalReference: "SAME-1", targetPrice: 31.99, conditionId: "3000", conditionName: "Good", conditionDescription: "", status: "queued" as const, photos: [], createdAt: "2026-10-05" };
+  const task: RestockTask = {
+    id: "same-task", itemId: "900000000301", variationKey: null, status: "active", restockDelaySeconds: 300, priceRule: null,
+    armedQuantitySold: 3, lastSeenQuantitySold: 3, lastSeenQuantityAvailable: 0, lastCheckedAt: null, lastError: null,
+    createdAt: "2026-10-05", updatedAt: "2026-10-05", listing: snapshot, queuedCopy: copy, queuedCopies: [copy],
+  };
+  const plan = buildRestockPlan(task, snapshot);
+  assert.equal(plan.mutation.uploadLocalPhotosToEps, false);
+  assert.equal(plan.mutation.replaceAllPictureUrls, false);
+  assert.equal(plan.mutation.revisePrice, true);
+  assert.ok(!plan.blockers.some((blocker) => /photo|condition/i.test(blocker)));
+  const bare = buildRestockPlan(task, { ...snapshot, imageUrls: [] });
+  assert.ok(bare.blockers.some((blocker) => /has none/.test(blocker)));
 });

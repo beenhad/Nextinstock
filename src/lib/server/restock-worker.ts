@@ -23,6 +23,17 @@ import { readStoredImage } from "./storage";
 import { flushDiscordNotifications, queueWorkerDiscordUpdate } from "./discord";
 import { saleTriggerState } from "./sale-trigger";
 
+/**
+ * A single-item copy with no photos is an "identical" copy: it keeps the live listing's
+ * photos, and an empty condition note keeps the live condition note. Only price and
+ * quantity change.
+ */
+export function effectiveCopyContent(copy: { photos: unknown[]; conditionDescription: string }, listing: ListingSnapshot) {
+  const reusesListingPhotos = copy.photos.length === 0;
+  const conditionDescription = copy.conditionDescription.trim() || (listing.conditionDescription ?? "").trim();
+  return { reusesListingPhotos, conditionDescription, listingPictureUrls: listing.imageUrls };
+}
+
 export function buildRestockPlan(task: RestockTask, current = task.listing): RestockPlan {
   const blockers = [...current.unsupportedReasons];
   if (!task.variationKey && current.variations.length) blockers.push("This task has no selected variation");
@@ -30,10 +41,10 @@ export function buildRestockPlan(task: RestockTask, current = task.listing): Res
   if (task.variationKey && !variation) blockers.push("The selected variation is no longer on eBay");
   const selected = variation ?? current;
   if (!task.queuedCopy) blockers.push("No next copy is queued");
-  if (!task.variationKey && task.queuedCopy && task.queuedCopy.photos.length === 0) {
-    blockers.push("The queued copy has no photos");
+  if (!task.variationKey && task.queuedCopy && task.queuedCopy.photos.length === 0 && current.imageUrls.length === 0) {
+    blockers.push("The queued copy reuses the listing photos, but the listing has none");
   }
-  if (!task.variationKey && !task.queuedCopy?.conditionDescription.trim()) {
+  if (!task.variationKey && task.queuedCopy && task.queuedCopy.photos.length > 0 && !task.queuedCopy.conditionDescription.trim()) {
     blockers.push("The queued copy needs a condition note");
   }
   const status = systemStatus();
@@ -62,8 +73,8 @@ export function buildRestockPlan(task: RestockTask, current = task.listing): Res
         }
       : null,
     mutation: {
-      uploadLocalPhotosToEps: !task.variationKey,
-      replaceAllPictureUrls: !task.variationKey,
+      uploadLocalPhotosToEps: !task.variationKey && Boolean(task.queuedCopy?.photos.length),
+      replaceAllPictureUrls: !task.variationKey && Boolean(task.queuedCopy?.photos.length),
       reviseConditionDescription: !task.variationKey,
       revisePrice: task.queuedCopy?.targetPrice !== null && task.queuedCopy?.targetPrice !== undefined,
       verifyWhileAtZero: !task.variationKey,
@@ -149,7 +160,7 @@ function scheduleOrWaitForRestock(
     };
   }
   if (!["created", "blocked", "dry_run"].includes(run.status)) return null;
-  const scheduledFor = new Date(Date.now() + restockDelaySeconds() * 1000).toISOString();
+  const scheduledFor = new Date(Date.now() + restockDelaySeconds(task.restockDelaySeconds) * 1000).toISOString();
   if (!scheduleHandoffRun(run.id, scheduledFor)) return null;
   setTaskStatus(task.id, "scheduled");
   appendActivity({
@@ -338,7 +349,7 @@ async function processTaskWithLease(taskId: string, owner: string): Promise<Work
     appliedCopyMatches(
       listing,
       run.ebayPictureUrls,
-      refreshedTask.queuedCopy.conditionDescription,
+      effectiveCopyContent(refreshedTask.queuedCopy, listing).conditionDescription,
       refreshedTask.queuedCopy.conditionId,
       1,
       refreshedTask.queuedCopy.targetPrice,
@@ -379,7 +390,11 @@ async function processTaskWithLease(taskId: string, owner: string): Promise<Work
     return { taskId, action: "skipped", message, listing, plan };
   }
 
-  if (!refreshedTask.queuedCopy || refreshedTask.queuedCopy.photos.length === 0 || !refreshedTask.queuedCopy.conditionDescription.trim()) {
+  const content = refreshedTask.queuedCopy ? effectiveCopyContent(refreshedTask.queuedCopy, listing) : null;
+  if (
+    !refreshedTask.queuedCopy || !content ||
+    (content.reusesListingPhotos ? content.listingPictureUrls.length === 0 : !refreshedTask.queuedCopy.conditionDescription.trim())
+  ) {
     const message = "Listing is held safely at zero because no complete next copy is queued.";
     setTaskStatus(task.id, "attention", message);
     updateHandoffRun(run.id, { status: "blocked", error: message });
@@ -426,7 +441,7 @@ async function processTaskWithLease(taskId: string, owner: string): Promise<Work
 
   try {
     await announceRestocking(task.id, listing, plan);
-    const pictureUrls: string[] = [];
+    const pictureUrls: string[] = content.reusesListingPhotos ? [...content.listingPictureUrls] : [];
     for (const photo of refreshedTask.queuedCopy.photos) {
       renewTaskLease(taskId, owner);
       if (photo.ebayImageUrl && photo.ebayImageId) {
@@ -449,7 +464,7 @@ async function processTaskWithLease(taskId: string, owner: string): Promise<Work
     const confirmed = await stageAndPublishCopy({
       itemId: listing.itemId,
       conditionId: refreshedTask.queuedCopy.conditionId,
-      conditionDescription: refreshedTask.queuedCopy.conditionDescription,
+      conditionDescription: content.conditionDescription,
       pictureUrls,
       targetPrice: refreshedTask.queuedCopy.targetPrice,
       currency: listing.currency,

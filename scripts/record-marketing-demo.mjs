@@ -17,10 +17,10 @@ const scratch = await mkdtemp(join(tmpdir(), "nextinstock-capture-"));
 const base = process.env.NEXTINSTOCK_CAPTURE_URL ?? "http://127.0.0.1:3000";
 const WIDTH = 1600;
 const HEIGHT = 1000;
-const ZOOM = 1.6; // renders a 1000x625 CSS-pixel layout at 1600x1000 so text stays crisp
+const ZOOM = 1.6; // 1000x625 layout; clips record at 1000x625, posters at 1.6x for sharp stills
 
 const captureCSS = `
-  html { zoom: ${ZOOM}; scrollbar-width: none; }
+  html { scrollbar-width: none; }
   html::-webkit-scrollbar { display: none; }
   nextjs-portal, .tool-sidebar, .tool-topbar { display: none !important; }
   .tool-shell { display: block !important; min-height: ${HEIGHT / ZOOM}px !important; background: #f7f7f8 !important; }
@@ -36,11 +36,8 @@ const captureCSS = `
 const sceneCSS = {
   choose: "",
   prepare: ".builder-heading { display: none !important; }",
-  restock: `.tool-page-heading, .tool-stat-row, .tool-table-toolbar { display: none !important; }
-    .tool-task-table-section { margin-top: 0 !important; }
-    .tool-task-head, .tool-task-row { grid-template-columns: minmax(0, 1.5fr) minmax(0, .9fr) 104px 132px !important; }
-    .tool-task-head > span:nth-child(2), .tool-task-row > .tool-copy-cell:nth-child(2) { display: none !important; }
-    .tool-workspace { padding-top: 64px !important; }`,
+  restock: `.tool-page-heading, .tool-stat-row, .rb-toolbar { display: none !important; }
+    .tool-workspace { padding-top: 40px !important; }`,
 };
 
 const cursorScript = `
@@ -52,7 +49,7 @@ const cursorScript = `
   document.addEventListener('pointerdown', event => { ring.style.left=event.clientX+'px'; ring.style.top=event.clientY+'px'; ring.classList.remove('pulse'); void ring.offsetWidth; ring.classList.add('pulse'); });
 `;
 
-let pointer = { x: WIDTH * 0.62, y: HEIGHT * 0.7 };
+let pointer = { x: (WIDTH / ZOOM) * 0.62, y: (HEIGHT / ZOOM) * 0.7 };
 async function glideTo(page, locator) {
   const box = await locator.boundingBox();
   if (!box) throw new Error("Recording target is not visible");
@@ -75,18 +72,18 @@ const browser = await chromium.launch({ headless: true,
 
 try {
   for (const scene of (process.env.CAPTURE_SCENES?.split(",") ?? ["choose", "prepare", "restock"])) {
-    const context = await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1,
-      recordVideo: { dir: scratch, size: { width: WIDTH, height: HEIGHT } } });
+    const context = await browser.newContext({ viewport: { width: WIDTH / ZOOM, height: HEIGHT / ZOOM }, deviceScaleFactor: ZOOM,
+      recordVideo: { dir: scratch, size: { width: WIDTH / ZOOM, height: HEIGHT / ZOOM } } });
     const page = await context.newPage();
     const videoStart = Date.now();
     await installFixtureApi(page, base, { latencyMs: 180, initialTasks: scene === "restock" ? undefined : [] });
     await page.goto(`${base}/tool`, { waitUntil: "networkidle" });
     await page.addStyleTag({ content: captureCSS + sceneCSS[scene] });
     await page.addScriptTag({ content: cursorScript });
-    pointer = { x: WIDTH * 0.62, y: HEIGHT * 0.7 };
+    pointer = { x: (WIDTH / ZOOM) * 0.62, y: (HEIGHT / ZOOM) * 0.7 };
 
     if (scene === "choose" || scene === "prepare") {
-      await page.getByRole("button", { name: /New restock task/ }).click();
+      await page.getByRole("button", { name: /Add a listing|Add your first listing/ }).first().click();
     }
     if (scene === "prepare") {
       await page.getByRole("textbox", { name: "eBay item number" }).fill("900000000102");
@@ -120,22 +117,43 @@ try {
       const note = page.getByRole("textbox", { name: /Condition note/ });
       await click(page, note);
       await note.pressSequentially("Complete in box. Disc tested.", { delay: 40 });
-      const price = page.getByRole("spinbutton", { name: /Price when this copy restocks/ });
+      const price = page.getByRole("spinbutton", { name: /Price for this copy/ });
       await click(page, price);
       await price.pressSequentially("84.99", { delay: 80 });
       await page.waitForTimeout(1500);
     } else {
       await page.waitForTimeout(500);
-      const second = page.locator(".tool-price-field input").nth(1);
-      await click(page, second);
-      await page.keyboard.press("ControlOrMeta+a");
-      await second.pressSequentially("82.50", { delay: 80 });
-      await page.keyboard.press("Enter");
+      // Drag the third copy to the front of the line.
+      const tile = page.locator(".rb-tile").nth(2);
+      await glideTo(page, tile);
+      const grip = tile.locator(".rb-grip");
+      await glideTo(page, grip);
+      const from = await grip.boundingBox();
+      const to = await page.locator(".rb-tile").nth(0).boundingBox();
+      await page.mouse.down();
+      const steps = 30;
+      for (let i = 1; i <= steps; i += 1) {
+        const t = i / steps; const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        await page.mouse.move(from.x + from.width / 2 + (to.x + 20 - from.x - from.width / 2) * ease, from.y + from.height / 2 + Math.sin(t * Math.PI) * -18);
+        await page.waitForTimeout(14);
+      }
+      pointer = { x: to.x + 20, y: from.y + from.height / 2 };
+      await page.waitForTimeout(150);
+      await page.mouse.up();
       await page.waitForTimeout(700);
-      await click(page, page.getByRole("button", { name: "Move GC-PKXD-011 earlier" }));
-      await page.waitForTimeout(900);
-      await click(page, page.getByRole("button", { name: /Check eBay/ }));
-      await page.waitForTimeout(3600);
+      // Set a price rule and apply it to the queue.
+      await click(page, page.locator("button.rb-pill").first());
+      await page.waitForTimeout(250);
+      const stepInput = page.getByLabel("Change per sale");
+      await click(page, stepInput);
+      await stepInput.press("ControlOrMeta+a");
+      await stepInput.pressSequentially("2", { delay: 60 });
+      await page.waitForTimeout(500);
+      await click(page, page.getByRole("button", { name: /Reprice \d+ queued/ }));
+      await page.waitForTimeout(1100);
+      // A sale comes in: check eBay and watch the next copy go live.
+      await click(page, page.getByRole("button", { name: "Check eBay now" }));
+      await page.waitForTimeout(3200);
     }
 
     await page.screenshot({ path: join(output, `${scene}.jpg`), type: "jpeg", quality: 88 });
