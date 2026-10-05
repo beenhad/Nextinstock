@@ -1,5 +1,7 @@
 # Nextinstock
 
+Free, open-source restock automation for eBay sellers. MIT licensed. Website: [nextinstock.com](https://nextinstock.com)
+
 Nextinstock prepares the next physical copy of a replenishable preowned eBay listing and waits for the selected listing or variation to reach zero. Single-item tasks apply queued photos and condition before restoring one unit; variation tasks retain eBay's existing photos and shared listing condition.
 
 The local MVP supports fixed-price listings with or without variations:
@@ -91,3 +93,11 @@ The UI and API remain useful in dry-run mode: listing sync, task creation, local
 ## Release preparation
 
 `npm run package:release` creates a source ZIP in `dist/` from an explicit file list. It excludes `.env.local`, `.nextinstock/`, dependencies, and build output. The public hosted build blocks local tool routes.
+
+## Contributing
+
+Issues and pull requests are welcome. Run `npm run check`, `npm test`, and `npm run build` before opening a PR. Never commit `.env.local` or the data folder.
+
+## License
+
+[MIT](LICENSE)

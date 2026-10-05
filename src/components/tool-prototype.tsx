@@ -25,10 +25,12 @@ import {
   Settings,
   ShieldCheck,
   Store,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type {
   ActivityEvent,
   EbayProfile,
@@ -42,6 +44,47 @@ import { BrandMark } from "./brand-mark";
 import { ToolSupport } from "./tool-support";
 
 type ToolView = "tasks" | "activity" | "settings" | "support";
+
+type QueueAction =
+  | { action: "price"; targetPrice: string }
+  | { action: "move"; direction: "up" | "down" }
+  | { action: "details"; internalReference?: string; conditionDescription?: string }
+  | { action: "remove" };
+
+/** Animate a state change with the View Transitions API when the browser has it. */
+function withTransition(update: () => void) {
+  const doc = typeof document === "undefined" ? null : document as Document & { startViewTransition?: (callback: () => void) => unknown };
+  if (doc?.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    doc.startViewTransition(() => flushSync(update));
+  } else {
+    update();
+  }
+}
+
+/** Apply a queue edit locally so the UI responds before the server does. */
+function applyQueueAction(task: RestockTask, copyId: string, body: QueueAction): RestockTask {
+  const copies = [...task.queuedCopies];
+  const index = copies.findIndex((copy) => copy.id === copyId);
+  if (index < 0) return task;
+  if (body.action === "move") {
+    const other = index + (body.direction === "up" ? -1 : 1);
+    if (other < 0 || other >= copies.length) return task;
+    [copies[index], copies[other]] = [copies[other], copies[index]];
+  } else if (body.action === "remove") {
+    copies.splice(index, 1);
+  } else if (body.action === "price") {
+    const value = body.targetPrice.trim() === "" ? null : Number(body.targetPrice);
+    copies[index] = { ...copies[index], targetPrice: value === null || Number.isFinite(value) ? value : copies[index].targetPrice };
+  } else {
+    copies[index] = {
+      ...copies[index],
+      ...(body.internalReference !== undefined ? { internalReference: body.internalReference.trim() } : {}),
+      ...(body.conditionDescription !== undefined ? { conditionDescription: body.conditionDescription.trim() } : {}),
+    };
+  }
+  const ordered = copies.map((copy, position) => ({ ...copy, queuePosition: position + 1 }));
+  return { ...task, queuedCopies: ordered, queuedCopy: ordered[0] ?? null };
+}
 
 const builderSteps = ["Listing", "Next copy", "Automation", "Review"];
 
@@ -160,9 +203,15 @@ export function ToolPrototype() {
     return () => { cancelled = true; };
   }, [status?.ebayConfigured, status?.ebayCredentialSource]);
 
+  const toastTimer = useRef<number | undefined>(undefined);
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+  const queueSequence = useRef(new Map<string, number>());
+
   function showToast(message: string) {
+    window.clearTimeout(toastTimer.current);
     setToast(message);
-    window.setTimeout(() => setToast(""), 3600);
+    toastTimer.current = window.setTimeout(() => setToast(""), 3200);
   }
 
   async function checkTask(taskId: string) {
@@ -172,8 +221,8 @@ export function ToolPrototype() {
       const response = await fetch(`/api/tasks/${taskId}/check`, { method: "POST" });
       const payload = (await response.json()) as { result?: WorkerResult; error?: string };
       if (!response.ok || !payload.result) throw new Error(payload.error || "Task check failed");
-      showToast(payload.result.message);
       await reload();
+      showToast(payload.result.message);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Task check failed");
     } finally {
@@ -181,38 +230,57 @@ export function ToolPrototype() {
     }
   }
 
-  async function updateQueue(taskId: string, copyId: string, body: { action: "price"; targetPrice: string } | { action: "move"; direction: "up" | "down" }) {
-    setBusyTaskId(taskId);
+  async function updateQueue(taskId: string, copyId: string, body: QueueAction): Promise<boolean> {
+    const current = tasksRef.current.find((task) => task.id === taskId);
+    if (!current) return false;
+    const sequence = (queueSequence.current.get(taskId) ?? 0) + 1;
+    queueSequence.current.set(taskId, sequence);
+    const nextTask = applyQueueAction(current, copyId, body);
+    const commit = () => setTasks((list) => list.map((task) => task.id === taskId ? nextTask : task));
+    if (body.action === "move" || body.action === "remove") withTransition(commit);
+    else commit();
     setError("");
     try {
-      const response = await fetch(`/api/tasks/${taskId}/copies/${copyId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error || "Could not update the queue");
-      showToast(body.action === "price" ? "Restock price saved" : "Queue order updated");
-      await reload();
+      const url = `/api/tasks/${taskId}/copies/${copyId}`;
+      const response = body.action === "remove"
+        ? await fetch(url, { method: "DELETE" })
+        : await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const payload = await response.json() as { task?: RestockTask; error?: string };
+      if (!response.ok || !payload.task) throw new Error(payload.error || "Could not update the queue");
+      if (queueSequence.current.get(taskId) === sequence) {
+        setTasks((list) => list.map((task) => task.id === taskId ? payload.task! : task));
+      }
+      if (body.action === "remove") showToast("Copy removed from the queue");
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update the queue");
-    } finally {
-      setBusyTaskId(null);
+      await reload().catch(() => undefined);
+      return false;
     }
   }
 
   function openView(nextView: ToolView) {
-    setView(nextView);
-    setBuilderStep(0);
-    setBuilderTask(null);
-    setError("");
+    withTransition(() => {
+      setView(nextView);
+      setBuilderStep(0);
+      setBuilderTask(null);
+      setError("");
+    });
+    if (nextView === "activity" || nextView === "tasks") void reload().catch(() => undefined);
+  }
+
+  function openBuilder(task: RestockTask | null, step: number) {
+    withTransition(() => { setBuilderTask(task); setBuilderStep(step); });
   }
 
   async function taskCreated(task: RestockTask) {
     const queuedAnotherCopy = Boolean(builderTask);
-    setBuilderStep(0);
-    setBuilderTask(null);
-    setView("tasks");
+    await reload().catch(() => undefined);
+    withTransition(() => {
+      setBuilderStep(0);
+      setBuilderTask(null);
+      setView("tasks");
+    });
     showToast(
       queuedAnotherCopy
         ? "Next physical copy queued"
@@ -220,7 +288,6 @@ export function ToolPrototype() {
         ? "Task activated · listing remains safely at zero"
         : "Restock task activated",
     );
-    await reload();
   }
 
   return (
@@ -270,8 +337,8 @@ export function ToolPrototype() {
               step={builderStep}
               status={status}
               existingTask={builderTask}
-              onStep={setBuilderStep}
-              onClose={() => { setBuilderStep(0); setBuilderTask(null); }}
+              onStep={(nextStep) => withTransition(() => setBuilderStep(nextStep))}
+              onClose={() => openBuilder(null, 0)}
               onCreated={taskCreated}
             />
           ) : view === "tasks" ? (
@@ -280,22 +347,22 @@ export function ToolPrototype() {
               events={events}
               loading={loading}
               busyTaskId={busyTaskId}
-              onNew={() => { setBuilderTask(null); setBuilderStep(1); }}
-              onQueue={(task) => { setBuilderTask(task); setBuilderStep(2); }}
+              onNew={() => openBuilder(null, 1)}
+              onQueue={(task) => openBuilder(task, 2)}
               onCheck={checkTask}
               onQueueAction={updateQueue}
             />
           ) : view === "activity" ? (
             <ActivityView events={events} />
           ) : view === "support" ? (
-            <ToolSupport status={status} onNewTask={() => { setBuilderTask(null); setBuilderStep(1); }} onSettings={() => openView("settings")} />
+            <ToolSupport status={status} onNewTask={() => openBuilder(null, 1)} onSettings={() => openView("settings")} />
           ) : (
             <SettingsView status={status} onSaved={reload} />
           )}
         </main>
       </div>
 
-      {toast && <div className="tool-toast"><CircleCheck size={17} /><span>{toast}</span></div>}
+      {toast && <div className="tool-toast" role="status" key={toast}><CircleCheck size={17} /><span>{toast}</span></div>}
     </div>
   );
 }
@@ -317,9 +384,17 @@ function TasksView({
   onNew: () => void;
   onQueue: (task: RestockTask) => void;
   onCheck: (taskId: string) => void;
-  onQueueAction: (taskId: string, copyId: string, body: { action: "price"; targetPrice: string } | { action: "move"; direction: "up" | "down" }) => Promise<void>;
+  onQueueAction: (taskId: string, copyId: string, body: QueueAction) => Promise<boolean>;
 }) {
   const [filter, setFilter] = useState<"all" | "attention">("all");
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  function toggleQueue(taskId: string) {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) next.delete(taskId); else next.add(taskId);
+      return next;
+    });
+  }
   const [search, setSearch] = useState("");
   const readyCopies = tasks.reduce((count, task) => count + task.queuedCopies.length, 0);
   const attention = tasks.filter((task) => ["attention", "error", "dry_run_ready"].includes(task.status)).length;
@@ -422,25 +497,33 @@ function TasksView({
                       )}
                     </div>
                   </div>
-                  {task.queuedCopies.length > 0 && (
-                    <details className="tool-queue-details">
-                      <summary>View copy order and restock prices <span>{task.queuedCopies.length}</span></summary>
-                      <ol>
-                        {task.queuedCopies.map((copy, index) => (
-                          <QueueCopyRow
-                            key={copy.id}
-                            copy={copy}
-                            index={index}
-                            count={task.queuedCopies.length}
-                            currency={variation?.currency ?? task.listing.currency}
-                            busy={busy}
-                            canMove={task.status !== "scheduled" && task.status !== "processing"}
-                            onAction={(body) => onQueueAction(task.id, copy.id, body)}
-                          />
-                        ))}
-                      </ol>
-                    </details>
-                  )}
+                  {task.queuedCopies.length > 0 && (() => {
+                    const open = !collapsed.has(task.id);
+                    const locked = task.status === "scheduled" || task.status === "processing";
+                    return <div className={`tool-queue ${open ? "is-open" : ""}`}>
+                      <button type="button" className="tool-queue-toggle" aria-expanded={open} aria-controls={`queue-${task.id}`} onClick={() => toggleQueue(task.id)}>
+                        <ChevronIcon open={open} />
+                        Queue <span>{task.queuedCopies.length}</span>
+                        <small>{locked ? "Locked while a restock runs" : "Edit in place. Changes save as you go."}</small>
+                      </button>
+                      <div className="tool-queue-body" id={`queue-${task.id}`}>
+                        <ol inert={!open}>
+                          {task.queuedCopies.map((copy, index) => (
+                            <QueueCopyRow
+                              key={copy.id}
+                              copy={copy}
+                              index={index}
+                              count={task.queuedCopies.length}
+                              currency={variation?.currency ?? task.listing.currency}
+                              locked={locked || busy}
+                              needsCondition={!task.variationKey}
+                              onAction={(body) => onQueueAction(task.id, copy.id, body)}
+                            />
+                          ))}
+                        </ol>
+                      </div>
+                    </div>;
+                  })()}
                 </div>
               );
             })
@@ -451,37 +534,147 @@ function TasksView({
   );
 }
 
+function ChevronIcon({ open }: { open: boolean }) {
+  return <svg className={`tool-chevron ${open ? "is-open" : ""}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>;
+}
+
 function QueueCopyRow({
-  copy, index, count, currency, busy, canMove, onAction,
+  copy, index, count, currency, locked, needsCondition, onAction,
 }: {
   copy: QueuedCopy;
   index: number;
   count: number;
   currency: string;
-  busy: boolean;
-  canMove: boolean;
-  onAction: (body: { action: "price"; targetPrice: string } | { action: "move"; direction: "up" | "down" }) => Promise<void>;
+  locked: boolean;
+  needsCondition: boolean;
+  onAction: (body: QueueAction) => Promise<boolean>;
 }) {
-  const [price, setPrice] = useState(copy.targetPrice?.toFixed(2) ?? "");
+  const savedPrice = copy.targetPrice?.toFixed(2) ?? "";
+  const [reference, setReference] = useState(copy.internalReference);
+  const [note, setNote] = useState(copy.conditionDescription);
+  const [price, setPrice] = useState(savedPrice);
+  const [saved, setSaved] = useState(false);
+  const [invalid, setInvalid] = useState<"" | "reference" | "note" | "price">("");
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const savedTimer = useRef<number | undefined>(undefined);
+  const removeTimer = useRef<number | undefined>(undefined);
+  const editable = copy.status === "queued" && !locked;
+
+  useEffect(() => setReference(copy.internalReference), [copy.internalReference]);
+  useEffect(() => setNote(copy.conditionDescription), [copy.conditionDescription]);
   useEffect(() => setPrice(copy.targetPrice?.toFixed(2) ?? ""), [copy.targetPrice]);
+  useEffect(() => () => { window.clearTimeout(savedTimer.current); window.clearTimeout(removeTimer.current); }, []);
+
+  async function save(body: QueueAction) {
+    setInvalid("");
+    if (await onAction(body)) {
+      setSaved(true);
+      window.clearTimeout(savedTimer.current);
+      savedTimer.current = window.setTimeout(() => setSaved(false), 1500);
+    }
+  }
+
+  function commitReference() {
+    const value = reference.trim();
+    if (value === copy.internalReference) return;
+    if (!value) { setInvalid("reference"); setReference(copy.internalReference); return; }
+    void save({ action: "details", internalReference: value });
+  }
+
+  function commitNote() {
+    const value = note.trim();
+    if (value === copy.conditionDescription) return;
+    if (needsCondition && !value) { setInvalid("note"); setNote(copy.conditionDescription); return; }
+    void save({ action: "details", conditionDescription: value });
+  }
+
+  function commitPrice() {
+    const value = price.trim();
+    if (value === savedPrice) return;
+    const number = Number(value);
+    if (value && (!Number.isFinite(number) || number <= 0)) { setInvalid("price"); setPrice(savedPrice); return; }
+    const normalized = value ? number.toFixed(2) : "";
+    setPrice(normalized);
+    if (normalized !== savedPrice) void save({ action: "price", targetPrice: normalized });
+  }
+
+  function keyHandlers(revert: () => void) {
+    return {
+      onKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        if (event.key === "Escape") { revert(); event.currentTarget.blur(); }
+        if (event.key === "Enter" && !(event.currentTarget instanceof HTMLTextAreaElement && event.shiftKey)) {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+      },
+    };
+  }
+
+  function askRemove() {
+    setConfirmRemove(true);
+    window.clearTimeout(removeTimer.current);
+    removeTimer.current = window.setTimeout(() => setConfirmRemove(false), 3500);
+  }
+
   return (
-    <li className="tool-queue-copy">
-      <span className="tool-queue-number">{index + 1}</span>
+    <li className={`tool-queue-copy ${index === 0 ? "is-next" : ""}`} style={{ viewTransitionName: `queue-copy-${copy.id}` }}>
+      <span className="tool-queue-number" aria-label={index === 0 ? "Next to go live" : `Position ${index + 1}`}>{index === 0 ? "Next" : index + 1}</span>
       <ListingImage src={copy.photos[0]?.url} alt={`${copy.internalReference} photos`} />
-      <div className="tool-queue-copy-info">
-        <strong>{copy.internalReference}</strong>
-        <small>{copy.photos.length} photos · {copy.conditionName ?? "Condition on listing"}</small>
+      <div className="tool-queue-fields">
+        <input
+          className={`tool-inline-input is-reference ${invalid === "reference" ? "is-invalid" : ""}`}
+          aria-label={`Internal reference for copy ${index + 1}`}
+          value={reference}
+          maxLength={100}
+          disabled={!editable}
+          onChange={(event) => setReference(event.target.value)}
+          onBlur={commitReference}
+          {...keyHandlers(() => setReference(copy.internalReference))}
+        />
+        <textarea
+          className={`tool-inline-input is-note ${invalid === "note" ? "is-invalid" : ""}`}
+          aria-label={`Condition note for copy ${index + 1}`}
+          rows={1}
+          value={note}
+          maxLength={1000}
+          placeholder={needsCondition ? "Condition note" : "Internal note (optional)"}
+          disabled={!editable}
+          onChange={(event) => setNote(event.target.value)}
+          onBlur={commitNote}
+          {...keyHandlers(() => setNote(copy.conditionDescription))}
+        />
+        <small>{copy.photos.length} {copy.photos.length === 1 ? "photo" : "photos"}{copy.conditionName ? ` · ${copy.conditionName}` : ""}</small>
       </div>
-      <div className="tool-queue-price">
-        <label htmlFor={`price-${copy.id}`}>Restock price · {currency}</label>
-        <div>
-          <input id={`price-${copy.id}`} type="number" inputMode="decimal" min="0.01" max="999999.99" step="0.01" placeholder="Keep live price" value={price} onChange={(event) => setPrice(event.target.value)} />
-          <button type="button" disabled={busy || price === (copy.targetPrice?.toFixed(2) ?? "")} onClick={() => onAction({ action: "price", targetPrice: price })}>Save</button>
-        </div>
-      </div>
-      <div className="tool-queue-move">
-        <button type="button" aria-label={`Move ${copy.internalReference} earlier`} disabled={busy || !canMove || index === 0} onClick={() => onAction({ action: "move", direction: "up" })}><ArrowUp size={16} /></button>
-        <button type="button" aria-label={`Move ${copy.internalReference} later`} disabled={busy || !canMove || index === count - 1} onClick={() => onAction({ action: "move", direction: "down" })}><ArrowDown size={16} /></button>
+      <label className={`tool-queue-price ${invalid === "price" ? "is-invalid" : ""}`}>
+        <span>Restock price</span>
+        <span className="tool-price-field">
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="Live price"
+            value={price}
+            disabled={!editable}
+            onChange={(event) => setPrice(event.target.value.replace(/[^0-9.]/g, ""))}
+            onBlur={commitPrice}
+            {...keyHandlers(() => setPrice(savedPrice))}
+          />
+          <em>{currency}</em>
+        </span>
+      </label>
+      <div className="tool-queue-tools">
+        <span className={`tool-saved ${saved ? "is-visible" : ""}`} aria-live="polite">{saved ? <><Check size={12} /> Saved</> : null}</span>
+        {confirmRemove ? (
+          <span className="tool-remove-confirm">
+            <button type="button" className="is-danger" onClick={() => { setConfirmRemove(false); void onAction({ action: "remove" }); }}>Remove</button>
+            <button type="button" onClick={() => setConfirmRemove(false)}>Keep</button>
+          </span>
+        ) : (
+          <span className="tool-queue-move">
+            <button type="button" aria-label={`Move ${copy.internalReference} earlier`} disabled={!editable || index === 0} onClick={() => void onAction({ action: "move", direction: "up" })}><ArrowUp size={15} /></button>
+            <button type="button" aria-label={`Move ${copy.internalReference} later`} disabled={!editable || index === count - 1} onClick={() => void onAction({ action: "move", direction: "down" })}><ArrowDown size={15} /></button>
+            <button type="button" aria-label={`Remove ${copy.internalReference} from the queue`} disabled={!editable} onClick={askRemove}><Trash2 size={15} /></button>
+          </span>
+        )}
       </div>
     </li>
   );

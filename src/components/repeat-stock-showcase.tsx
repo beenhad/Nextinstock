@@ -6,22 +6,22 @@ const steps = [
   {
     title: "Pick the listing", short: "Pick",
     summary: "Choose the live listing you keep restocking. On a variation listing, pick the exact color or option.",
-    video: "/demos/choose.mp4?v=4", webm: "/demos/choose.webm?v=4", poster: "/demos/choose.jpg?v=4",
+    video: "/demos/choose.mp4?v=5", webm: "/demos/choose.webm?v=5", poster: "/demos/choose.jpg?v=5", fit: "fill",
   },
   {
     title: "Queue the next copies", short: "Queue",
     summary: "Shoot each copy once. Give it photos, a condition note, and a price, then set the selling order.",
-    video: "/demos/prepare-detail.mp4?v=1", webm: "", poster: "/demos/prepare-detail.jpg?v=1",
+    video: "/demos/prepare.mp4?v=5", webm: "/demos/prepare.webm?v=5", poster: "/demos/prepare.jpg?v=5", fit: "fill",
   },
   {
     title: "It restocks on its own", short: "Restock",
-    summary: "When one sells, Next swaps in the next copy, checks that eBay took it, and puts one back up for sale.",
-    video: "/demos/restock.mp4?v=4", webm: "/demos/restock.webm?v=4", poster: "/demos/restock.jpg?v=4",
+    summary: "Reorder or reprice anytime. When one sells, Next swaps in the next copy and checks that eBay took it.",
+    video: "/demos/restock.mp4?v=5", webm: "/demos/restock.webm?v=5", poster: "/demos/restock.jpg?v=5", fit: "fill",
   },
   {
     title: "Get the ping", short: "Alert",
     summary: "Every sale and restock posts to your Discord, so you know it happened without opening eBay.",
-    video: "/demos/discord-detail.mp4?v=3", webm: "", poster: "/demos/discord-detail.jpg?v=2",
+    video: "/demos/discord-detail.mp4?v=3", webm: "", poster: "/demos/discord-detail.jpg?v=2", fit: "framed",
   },
 ] as const;
 
@@ -90,7 +90,7 @@ export function RepeatStockShowcase() {
         </button>;
       })}
     </div>
-    <div className="steps-stage" id="steps-panel" role="tabpanel" aria-labelledby={`steps-tab-${activeIndex}`}>
+    <div className={`steps-stage is-${step.fit}`} id="steps-panel" role="tabpanel" aria-labelledby={`steps-tab-${activeIndex}`}>
       <button className="steps-stage-surface" type="button" onClick={() => setPlaying((value) => !value)} aria-label={`${playing ? "Pause" : "Play"} the ${step.title.toLowerCase()} preview`}>
         <video
           key={step.video}
