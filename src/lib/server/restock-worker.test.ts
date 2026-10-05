@@ -75,7 +75,7 @@ test("variation plan reads the selected option and leaves buyer-facing photos an
   const variation = { key: "orange", sku: null, specifics: [{ name: "Colors", value: "Spice Orange" }], label: "Colors: Spice Orange", price: 59.99, currency: "USD", quantityTotal: 70, quantitySold: 70, quantityAvailable: 0, imageUrls: ["https://i.ebayimg.com/orange.jpg"], hasSpecificPhotos: true };
   const snapshot = { ...listing, variations: [variation], unsupportedReasons: [], quantitySold: 683, quantityAvailable: 152 } as ListingSnapshot;
   const task: RestockTask = {
-    id: "orange-task", itemId: "267535199020", variationKey: "orange", status: "active",
+    id: "orange-task", itemId: "900000000201", variationKey: "orange", status: "active",
     armedQuantitySold: 70, lastSeenQuantitySold: 70, lastSeenQuantityAvailable: 0,
     lastCheckedAt: null, lastError: null, createdAt: "2026-10-02", updatedAt: "2026-10-02",
     listing: snapshot,

@@ -9,7 +9,6 @@
     "start": "next start --hostname 127.0.0.1",
     "start:local": "node scripts/start-local.mjs",
     "setup:local": "node scripts/setup-local.mjs",
-    "package:release": "node scripts/package-release.mjs",
     "record:demos": "node scripts/record-marketing-demo.mjs",
     "check": "tsc --noEmit",
     "test": "tsx --test src/lib/server/*.test.ts",
@@ -24,8 +23,7 @@
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-icons": "^5.7.0",
-    "sharp": "0.35.5",
-    "stripe": "^23.0.0"
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

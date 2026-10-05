@@ -39,13 +39,13 @@ test("parses SKU-less variations, stock, and the matching picture set", () => {
 
 test("variation quantity revision identifies one SKU-less option without changing photos or condition", () => {
   const variation = parseVariations(`<Variation><StartPrice currencyID="USD">59.99</StartPrice><Quantity>70</Quantity><SellingStatus><QuantitySold>70</QuantitySold></SellingStatus><VariationSpecifics><NameValueList><Name>Colors</Name><Value>Spice &amp; Orange</Value></NameValueList></VariationSpecifics></Variation>`, []).variations[0];
-  const xml = variationQuantityRequest("267535199020", variation, 1);
-  assert.match(xml, /<ItemID>267535199020<\/ItemID>/);
+  const xml = variationQuantityRequest("900000000201", variation, 1);
+  assert.match(xml, /<ItemID>900000000201<\/ItemID>/);
   assert.match(xml, /<StartPrice currencyID="USD">59.99<\/StartPrice>/);
   assert.match(xml, /<Quantity>1<\/Quantity>/);
   assert.match(xml, /Spice &amp; Orange/);
   assert.doesNotMatch(xml, /<SKU>|<PictureDetails>|<ConditionDescription>/);
-  const repriced = variationQuantityRequest("267535199020", variation, 1, 64.99);
+  const repriced = variationQuantityRequest("900000000201", variation, 1, 64.99);
   assert.match(repriced, /<StartPrice currencyID="USD">64.99<\/StartPrice>/);
   assert.match(repriced, /<Quantity>1<\/Quantity>/);
 });

@@ -57,7 +57,7 @@ export default function DocsPage() {
             <div><code>EBAY_CERT_ID</code><span>Your Cert ID.</span></div>
             <div><code>EBAY_REDIRECT_RU_NAME</code><span>The RuName for your OAuth consent flow.</span></div>
           </div>
-          <p>For OAuth, set the RuName&apos;s accepted URL in the eBay developer portal to <code>https://&lt;your-stable-host&gt;/api/ebay/auth/callback</code>. This callback setup still requires a stable host; it is not a one-click buyer setup yet. In the local tool&apos;s Settings, choose <strong>Reconnect for writes</strong> to store a Nextinstock grant with <code>sell.inventory</code> permission. If you already have a seller refresh token, <code>EBAY_REFRESH_TOKEN</code> can support read-only setup, but it does not authorize live writes by itself.</p>
+          <p>For OAuth, set the RuName&apos;s accepted URL in the eBay developer portal to <code>https://&lt;your-stable-host&gt;/api/ebay/auth/callback</code>. This callback setup still requires a stable host; it is not a one-click setup yet. In the local tool&apos;s Settings, choose <strong>Reconnect for writes</strong> to store a Nextinstock grant with <code>sell.inventory</code> permission. If you already have a seller refresh token, <code>EBAY_REFRESH_TOKEN</code> can support read-only setup, but it does not authorize live writes by itself.</p>
         </section>
 
         <section className="docs-section" id="first-task">
