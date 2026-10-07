@@ -6,6 +6,7 @@ import { pendingDiscordNotifications, queueDiscordNotification, recordDiscordDel
 import type { ListingSnapshot, RestockPlan, WorkerResult } from "@/lib/types";
 
 type DiscordEmbed = {
+  author?: { name: string };
   title: string;
   description?: string;
   color: number;
@@ -71,52 +72,39 @@ function shortPlainText(value: string, length = 70): string {
   return text.length > length ? text.slice(0, length - 1).trimEnd() + "…" : text;
 }
 
+const money = (value: number, currency: string) => new Intl.NumberFormat("en-US", { style: "currency", currency }).format(value);
+
+/** One plain sentence: what happens next. */
 function restockAction(result: WorkerResult): string {
-  const plan = result.plan;
-  const copy = plan?.copy;
-  const price = copy?.targetPrice == null
-    ? ""
-    : ` · price ${new Intl.NumberFormat("en-US", { style: "currency", currency: result.listing.currency }).format(copy.targetPrice)}`;
-  const work = copy
-    ? plan?.variationKey
-      ? `${shortPlainText(copy.internalReference, 36)} · selected option 0 → 1${price}; photos and condition unchanged.`
-      : `${shortPlainText(copy.internalReference, 36)} · ${copy.photoCount} photos + condition${price} → verify at 0 → publish 1.`
-    : "";
-  if (result.action === "held_at_zero") {
-    return copy
-      ? "Queued copy needs work. Listing stays at 0 until it is ready."
-      : "No next copy queued · listing stays at 0. Add a copy to resume.";
+  const copy = result.plan?.copy;
+  const remaining = result.remainingQueuedCopies;
+  switch (result.action) {
+    case "restock_scheduled":
+      if (!result.scheduledFor || !copy) return "Open Next to check the next copy.";
+      return `Next copy goes up <t:${Math.floor(Date.parse(result.scheduledFor) / 1000)}:R>.`;
+    case "awaiting_approval":
+      return `The next copy is ready and waiting for you. **[Put it up](${publicAppUrl()}/tool?approve=${encodeURIComponent(result.taskId)})**`;
+    case "restocking":
+      return "Putting the next copy up now. The listing stays at 0 until it's done.";
+    case "restocked":
+      if (remaining === 0) return "Back in stock. That was the last copy lined up.";
+      if (remaining !== undefined) return `Back in stock. ${remaining} more ${remaining === 1 ? "copy" : "copies"} lined up.`;
+      return "Back in stock.";
+    case "dry_run_ready":
+      return "Test mode, so eBay wasn't changed. In live mode this copy would go up now.";
+    case "held_at_zero":
+      return copy ? "The next copy needs details before it can go up. Listing stays at 0." : "No copies left in line. Listing stays at 0 until you add one.";
+    case "skipped":
+      return `Not restocked: ${shortPlainText(result.message, 90)}`;
+    case "failed":
+      return `Not restocked: ${shortPlainText(result.message, 90)}`;
+    default:
+      return "Open Next for details.";
   }
-  if (result.action === "awaiting_approval") {
-    const base = publicAppUrl();
-    return `Next copy is ready${work ? `: ${work}` : "."}\n[Approve the restock](${base}/tool?approve=${encodeURIComponent(result.taskId)}) · opens Next on your computer`;
-  }
-  if (result.action === "dry_run_ready") {
-    return `Live writes off · listing stays at 0.${work ? `\nPrepared: ${work}` : ""}`;
-  }
-  if (result.action === "restocking") {
-    return `Applying queued copy while listing stays at 0.${work ? `\n${work}` : ""}`;
-  }
-  if (result.action === "restocked") {
-    if (result.remainingQueuedCopies === 0) return "One unit is live. No other copies are queued for the next sale.";
-    if (result.remainingQueuedCopies !== undefined) return `One unit is live. ${result.remainingQueuedCopies} ${result.remainingQueuedCopies === 1 ? "copy" : "copies"} queued for the next sale.`;
-    return "One unit is live. Check the next copy in Next.";
-  }
-  if (result.action === "failed") {
-    return `Review Activity. ${shortPlainText(result.message, 95)}`;
-  }
-  if (result.action === "skipped") {
-    return `Review task before restocking. ${shortPlainText(result.message, 90)}`;
-  }
-  if (result.action !== "restock_scheduled" || !result.scheduledFor || !copy) {
-    return "Review the restock task in Next.";
-  }
-  const eligibleAt = Math.floor(Date.parse(result.scheduledFor) / 1000);
-  return `Awaiting restock · eligible <t:${eligibleAt}:R> (next worker check)\n${work}`;
 }
 
 function productEmbed(listing: ListingSnapshot, options: {
-  title: string;
+  label: string;
   color: number;
   at: Date;
   variationKey?: string | null;
@@ -124,41 +112,51 @@ function productEmbed(listing: ListingSnapshot, options: {
   available?: number;
   soldLabel?: string;
   availableLabel?: string;
-  nextAction?: string;
+  summary?: string;
+  nextCopy?: string;
   footer?: string;
 }): DiscordEmbed {
   const variation = listing.variations.find((item) => item.key === options.variationKey);
   const image = variation?.imageUrls.map(safeProductImage).find(Boolean) ?? listing.imageUrls.map(safeProductImage).find(Boolean);
-  const footer = options.footer ?? "eBay " + listing.itemId + (variation ? " · " + variation.label.slice(0, 45) : "");
   const listingUrl = safeListingUrl(listing.listingUrl);
-  const productTitle = shortProductTitle(listing.title);
   const embed: DiscordEmbed = {
-    title: options.title,
-    description: listingUrl ? `[${productTitle}](${listingUrl})` : productTitle,
+    author: { name: options.label },
+    title: shortProductTitle(listing.title) + (variation ? ` · ${variation.label.slice(0, 30)}` : ""),
     color: options.color,
     timestamp: options.at.toISOString(),
-    footer: { text: footer },
+    footer: { text: options.footer ?? `eBay ${listing.itemId}` },
   };
+  if (listingUrl) embed.url = listingUrl;
+  if (options.summary) embed.description = options.summary;
   if (image) embed.thumbnail = { url: image };
   if (options.sold !== undefined && options.available !== undefined) {
     embed.fields = [
-      { name: "SOLD", value: options.soldLabel ?? String(options.sold), inline: false },
-      { name: "AVAILABLE", value: options.availableLabel ?? String(options.available), inline: false },
+      { name: "Sold", value: options.soldLabel ?? String(options.sold), inline: true },
+      { name: "Available", value: options.availableLabel ?? String(options.available), inline: true },
     ];
-  }
-  if (options.nextAction) {
-    embed.fields ??= [];
-    embed.fields.push({ name: "NEXT ACTION", value: options.nextAction, inline: false });
+    if (options.nextCopy) embed.fields.push({ name: "Next copy", value: options.nextCopy, inline: true });
   }
   return embed;
+}
+
+/** "$86.99 · 5 photos" or "Same photos" for the copy that goes up next. */
+function nextCopyLabel(result: WorkerResult): string | undefined {
+  const copy = result.plan?.copy;
+  if (!copy) return undefined;
+  const parts = [
+    copy.targetPrice == null ? null : money(copy.targetPrice, result.listing.currency),
+    result.plan?.variationKey ? "Same option" : copy.photoCount ? `${copy.photoCount} photos` : "Same photos",
+  ].filter(Boolean);
+  return parts.join(" · ");
 }
 
 export function buildTestDiscordPayload(at = new Date()): DiscordWebhookPayload {
   return {
     username: "Next",
     embeds: [{
-      title: "🔔 Connection test",
-      description: "Discord alerts are connected. No eBay listing was checked or changed.",
+      author: { name: "Connected" },
+      title: "Next will post here",
+      description: "Sales, restocks, and anything that needs you will show up in this channel. Nothing on eBay was checked or changed.",
       color: COLORS.test,
       timestamp: at.toISOString(),
       footer: { text: "Next · Test" },
@@ -192,44 +190,45 @@ export function buildPreviewDiscordPayload(listing: ListingSnapshot, at = new Da
   const embeds = results.map((result, index) => {
     const embed = buildWorkerDiscordPayload(result, at)?.embeds?.[0];
     if (!embed) throw new Error("Could not build a Discord alert preview");
-    return { ...embed, footer: { text: `PREVIEW ${index + 1}/${results.length} · Trigger ${sold} sold · Simulated · No eBay change` } };
+    return { ...embed, footer: { text: `Preview ${index + 1} of ${results.length} · Simulated, eBay not changed` } };
   });
   return { username: "Next", embeds };
 }
 
+const LABELS: Partial<Record<WorkerResult["action"], string>> = {
+  restock_scheduled: "Sold",
+  awaiting_approval: "Sold · waiting for your OK",
+  restocking: "Restocking",
+  restocked: "Restocked",
+  dry_run_ready: "Restock ready · test mode",
+  held_at_zero: "Out of copies",
+  skipped: "Needs review",
+  failed: "Restock failed",
+};
+
 export function buildWorkerDiscordPayload(result: WorkerResult, at = new Date()): DiscordWebhookPayload | null {
-  const statuses: Partial<Record<WorkerResult["action"], { title: string }>> = {
-    restock_scheduled: { title: result.trigger?.kind === "new_sale" ? "🟢 NEW SALE" : "🟢 AWAITING RESTOCK" },
-    restocking: { title: "🔵 RESTOCKING" },
-    dry_run_ready: { title: "🔵 RESTOCK READY · DRY RUN" },
-    held_at_zero: { title: "🟠 RESTOCK ON HOLD" },
-    awaiting_approval: { title: "🟡 SOLD · WAITING FOR YOUR OK" },
-    skipped: { title: "🟠 RESTOCK NEEDS REVIEW" },
-    restocked: { title: "🟢 RESTOCKED" },
-    failed: { title: "🔴 RESTOCK NEEDS ATTENTION" },
-  };
-  const status = statuses[result.action];
-  if (!status) return null;
+  let label = LABELS[result.action];
+  if (!label) return null;
+  if (result.action === "restock_scheduled" && result.trigger?.kind === "already_at_zero") label = "Sold out · restock lined up";
+  if (result.action === "held_at_zero" && result.plan?.copy) label = "On hold";
   const variation = result.listing.variations.find((item) => item.key === result.plan?.variationKey);
-  const color = COLORS[result.action as keyof typeof COLORS];
   const trigger = result.plan?.trigger;
-  const footer = trigger
-    ? `eBay ${result.listing.itemId} · Trigger ${trigger.armedQuantitySold ?? trigger.currentQuantitySold} sold / 0 available${variation ? ` · ${variation.label.slice(0, 30)}` : ""}`
-    : `eBay ${result.listing.itemId}`;
-  const showChange = result.trigger?.kind === "new_sale" && ["restock_scheduled", "dry_run_ready", "held_at_zero"].includes(result.action);
+  const showChange = result.trigger?.kind === "new_sale" && ["restock_scheduled", "awaiting_approval", "dry_run_ready", "held_at_zero"].includes(result.action);
+  const mode = result.plan?.writeMode === "dry-run" || result.action === "dry_run_ready" ? " · Test mode" : "";
   return {
     username: "Next",
     embeds: [productEmbed(result.listing, {
-      ...status,
-      color,
+      label,
+      color: COLORS[result.action as keyof typeof COLORS],
       at,
       variationKey: result.plan?.variationKey,
       sold: variation?.quantitySold ?? result.listing.quantitySold,
       available: variation?.quantityAvailable ?? result.listing.quantityAvailable,
-      soldLabel: showChange ? `${result.trigger!.previousSold} → ${trigger?.currentQuantitySold}` : undefined,
+      soldLabel: showChange ? `${result.trigger!.previousSold} → ${trigger?.currentQuantitySold ?? result.listing.quantitySold}` : undefined,
       availableLabel: showChange ? `${result.trigger!.previousAvailable} → 0` : undefined,
-      nextAction: restockAction(result),
-      footer,
+      summary: restockAction(result),
+      nextCopy: ["restocked", "failed", "skipped"].includes(result.action) ? undefined : nextCopyLabel(result),
+      footer: `eBay ${result.listing.itemId}${mode}`,
     })],
   };
 }
