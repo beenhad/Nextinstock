@@ -74,9 +74,9 @@ export default function HomePage() {
         <div className="site-container hero-grid">
           <div className="hero-copy">
             <span className="hero-kicker">Free and open source for eBay sellers</span>
-            <h1>Line up every copy. Never restock by hand again.</h1>
+            <h1>Restocks that never stop.</h1>
             <p className="hero-lede">
-              Batch your copies onto one eBay listing, each with its own photos and price or a stack of the same. Every time one sells, Next puts the next one up on the same item number, at the pace you set.
+              Line up every copy you have for a listing, once. Each time one sells, Next puts the next one up on the same eBay item number. No relisting, no babysitting.
             </p>
             <div className="hero-actions">
               <a className="primary-link hero-price-link" href={REPO_URL} target="_blank" rel="noreferrer">
