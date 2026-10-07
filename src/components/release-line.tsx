@@ -55,15 +55,14 @@ function gradeMeta(grade: CopyGrade | null) {
   return GRADES.find((entry) => entry.value === grade) ?? null;
 }
 
-/** Copies with no photos of their own, next to each other, read as one stack. */
+/** Copies with no photos of their own read as one stack, even a stack of one, so they can grow with +. */
 function toUnits(copies: QueuedCopy[]): Unit[] {
   const units: Unit[] = [];
   copies.forEach((copy, index) => {
     const last = units.at(-1);
-    const same = copy.photos.length === 0;
-    if (same && last && (last.kind === "run" || (last.kind === "copy" && last.copy.photos.length === 0))) {
-      if (last.kind === "run") last.copies.push(copy);
-      else units[units.length - 1] = { kind: "run", id: `run-${last.copy.id}`, copies: [last.copy, copy], start: last.start };
+    if (copy.photos.length === 0) {
+      if (last?.kind === "run") last.copies.push(copy);
+      else units.push({ kind: "run", id: `run-${copy.id}`, copies: [copy], start: index });
       return;
     }
     units.push({ kind: "copy", id: copy.id, copy, start: index });
@@ -138,6 +137,7 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
   const isVariation = Boolean(task.variationKey);
 
   const [selection, setSelection] = useState<Selection>(() => (copies.length ? null : { type: "add" }));
+  const lastUnit = useRef<Unit | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [caret, setCaret] = useState<number | null>(null);
 
@@ -146,8 +146,13 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
     if (selection?.type === "unit" && !units.some((unit) => unit.id === selection.id)) {
       // A copy that joined (or left) a stack changes the stack's key; follow it.
       const bare = selection.id.replace(/^run-/, "");
-      const home = units.find((unit) => unitCopies(unit).some((copy) => copy.id === bare));
+      const home = units.find((unit) => unitCopies(unit).some((copy) => copy.id === bare))
+        ?? units.find((unit) => lastUnit.current && unitCopies(lastUnit.current).some((gone) => unitCopies(unit).some((copy) => copy.id === gone.id)));
       if (home) setSelection({ type: "unit", id: home.id });
+      else if (!lastUnit.current || !unitCopies(lastUnit.current).some((gone) => copies.some((copy) => copy.id === gone.id) || gone.id.startsWith("pending-"))) {
+        // Everything it pointed at is gone (e.g. the last copy was removed).
+        if (!copies.some((copy) => copy.id === bare || copy.id.startsWith("pending-"))) setSelection(copies.length ? null : { type: "add" });
+      }
     }
     if (selection?.type === "link" && !copies.some((copy) => copy.id === selection.copyId)) setSelection(null);
   }, [units, copies, selection]);
@@ -198,7 +203,6 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
     if (order.join() !== copies.map((copy) => copy.id).join()) void actions.onPatch({ order });
   }
 
-  const lastUnit = useRef<Unit | null>(null);
   const foundUnit = selection?.type === "unit" ? units.find((unit) => unit.id === selection.id) ?? null : null;
   if (foundUnit) lastUnit.current = foundUnit;
   const selectedUnit = selection?.type === "unit" ? foundUnit ?? lastUnit.current : null;
@@ -413,7 +417,7 @@ function SortableUnit({ unit, size, live, livePhoto, currency, selected, linkSel
     </button>
     <button
       type="button"
-      className={`rl-node ${unit.kind === "run" ? "is-run" : ""} ${selected ? "is-selected" : ""}`}
+      className={`rl-node ${unit.kind === "run" && unit.copies.length > 1 ? "is-run" : ""} ${selected ? "is-selected" : ""}`}
       data-key={`node-${unit.id}`}
       onClick={onSelect}
       {...attributes}
@@ -431,20 +435,22 @@ function NodeFace({ unit, live, livePhoto, currency, lifted = false }: {
   const copies = unitCopies(unit);
   const first = copies[0];
   const own = first.photos[0]?.url ?? null;
+  const single = unit.kind === "copy" || copies.length === 1;
   const grade = gradeMeta(first.grade);
-  const label = unit.kind === "run"
+  const label = unit.kind === "run" && copies.length > 1
     ? `#${unit.start + 1}–${unit.start + copies.length}`
     : `${unit.start + 1}`;
   return <>
-    <span className={`rl-tile ${own ? "" : "is-same"} ${lifted ? "is-lifted" : ""}`}>
+    <span className={`rl-tile ${own ? "" : "is-same"} ${lifted ? "is-lifted" : ""} ${single ? "" : "is-stack"}`}>
       {(own ?? livePhoto) ? <img src={own ?? livePhoto ?? ""} alt="" draggable={false} /> : <Camera size={20} aria-hidden="true" />}
       <span className="rl-num">{label}</span>
-      {unit.kind === "run" && <span className="rl-count">×{copies.length}</span>}
+      {unit.kind === "run" && copies.length > 1 && <span className="rl-count">×{copies.length}</span>}
+      {unit.kind === "run" && copies.length === 1 && <span className="rl-same">Same photos</span>}
       {unit.kind === "copy" && grade && <span className="rl-dot" style={{ background: grade.color }} title={grade.label} />}
-      {!own && unit.kind === "copy" && <span className="rl-same">Same photos</span>}
+
     </span>
     <span className="rl-price">{priceSpan(copies, live, currency)}</span>
-    <span className="rl-sub">{unit.kind === "run" ? "Same photos" : grade?.label ?? (own ? "Own photos" : "Same as listing")}</span>
+    <span className="rl-sub">{unit.kind === "run" ? (copies.length === 1 ? "Same as listing" : "Same photos") : grade?.label ?? "Own photos"}</span>
   </>;
 }
 
@@ -624,7 +630,7 @@ function RunEditor({ copies, start, live, livePhoto, currency, locked, canAdd, o
     </div>
     <div className="rl-fields">
       <div className="rl-sheet-head">
-        <h3>{copies.length} of the same<small>#{start + 1} to #{start + copies.length} in line</small></h3>
+        <h3>{copies.length === 1 ? "Same as the listing" : `${copies.length} of the same`}<small>{copies.length === 1 ? `#${start + 1} in line. Tap + to stack more.` : `#${start + 1} to #${start + copies.length} in line`}</small></h3>
         <button type="button" className="rl-icon is-small" onClick={onClose} aria-label="Close"><X size={16} /></button>
       </div>
       <div className="rl-row"><span>How many</span>
@@ -650,13 +656,17 @@ function RunEditor({ copies, start, live, livePhoto, currency, locked, canAdd, o
           </div>}
         </div>
       </div>
-      <div className="rl-row"><span>Between them</span>
-        <TimingChoice copy={copies[Math.min(1, copies.length - 1)]} locked={locked} after="the one before"
-          onChange={async (body) => {
-            const results = await Promise.all(copies.slice(1).map((copy) => onQueueAction(copy.id, body)));
-            return results.every(Boolean);
-          }} />
-      </div>
+      {copies.length > 1
+        ? <div className="rl-row"><span>Between them</span>
+          <TimingChoice copy={copies[1]} locked={locked} after="the one before"
+            onChange={async (body) => {
+              const results = await Promise.all(copies.slice(1).map((copy) => onQueueAction(copy.id, body)));
+              return results.every(Boolean);
+            }} />
+        </div>
+        : <div className="rl-row"><span>Goes up</span>
+          <TimingChoice copy={copies[0]} locked={locked} after={start === 0 ? "the one on eBay" : `#${start}`} onChange={(body) => onQueueAction(copies[0].id, body)} />
+        </div>}
     </div>
   </div>;
 }
