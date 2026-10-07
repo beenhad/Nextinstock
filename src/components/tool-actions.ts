@@ -19,6 +19,8 @@ export type TaskPatch = {
   restockDelaySeconds?: number | null;
   priceRule?: PriceRule | null;
   order?: string[];
+  /** Client only: dnd-kit already animated the drop. */
+  fromDrag?: boolean;
   prices?: Array<{ copyId: string; targetPrice: string | null }>;
 };
 
