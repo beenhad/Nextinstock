@@ -1,105 +1,123 @@
-# Nextinstock
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/readme/header-dark.png">
+    <img src=".github/readme/header-light.png" width="760" alt="next. Restocks that never stop. Free and open source, MIT, runs on your Mac.">
+  </picture>
+</p>
 
-Free, open-source restock automation for eBay sellers. MIT licensed. Website: [nextinstock.com](https://nextinstock.com)
+<p align="center">
+  <a href="https://nextinstock.com"><b>nextinstock.com</b></a> &nbsp;·&nbsp;
+  <a href="https://nextinstock.com/docs"><b>Setup guide</b></a> &nbsp;·&nbsp;
+  <a href="DISCORD_SETUP.md"><b>Discord alerts</b></a>
+</p>
 
-Nextinstock prepares the next physical copy of a replenishable preowned eBay listing and waits for the selected listing or variation to reach zero. Single-item tasks apply queued photos and condition before restoring one unit; variation tasks retain eBay's existing photos and shared listing condition.
+<p align="center">
+  <img src="public/demos/hero-release-line.webp" width="880" alt="The release line: the copy on eBay now, followed by the copies lined up to sell next, each with its own price.">
+</p>
 
-The local MVP supports fixed-price listings with or without variations:
+Next keeps an eBay listing in stock for you. Line up every copy you have, each with its own photos and price or a stack of the same. When one sells, Next puts the next one up on the **same item number**, so the listing keeps its sold count instead of starting over.
 
-- Good 'Til Cancelled
-- eBay Out-of-Stock Control enabled
-- Ordered queue of up to 100 physical copies per task, each with an optional restock price
-- Local image storage on the Mac
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/readme/steps-dark.png">
+    <img src=".github/readme/steps-light.png" width="880" alt="1 Pick the listing. 2 Line up your copies. 3 Set the pace. 4 It sells, next goes up.">
+  </picture>
+</p>
 
-For multi-variation listings, choose the exact variation for each task. The setup list can show all options or a saved subset; search always finds every option. Each variation uses its own sold count and available quantity. Tasks on the same eBay item are checked serially.
+<p align="center">
+  <img src=".github/readme/restock.gif" width="760" alt="A copy sells and the next one goes live on the same listing.">
+</p>
 
-## Run it locally
+## Quick start
 
-For a guided setup with an AI assistant, follow [INSTALL_WITH_AI.md](INSTALL_WITH_AI.md). Setup creates a data directory outside the project folder so `git pull` never touches queued photos or the SQLite ledger. [DISCORD_SETUP.md](DISCORD_SETUP.md) covers optional channel alerts.
+You need a Mac with Node.js 22+, an eBay seller account, and your own eBay developer keys.
 
 ```bash
 git clone https://github.com/beenhad/Nextinstock.git
 cd Nextinstock
 npm ci
-npm run setup:local
-```
-
-Enter your own eBay developer credentials in `.env.local`. Keep `NEXTINSTOCK_EBAY_WRITE_MODE=dry-run` while testing. The setup command places operational data in your user Library outside the project folder.
-
-Build, then run the app and worker together:
-
-```bash
+npm run setup:local      # creates .env.local and a private data folder
 npm run build
-npm run start:local
+npm run start:local      # app + worker
 ```
 
-Open [http://127.0.0.1:3000/tool](http://127.0.0.1:3000/tool).
+Open [127.0.0.1:3000/tool](http://127.0.0.1:3000/tool). Put your eBay keys in `.env.local` (never in a chat or a commit). Next starts in **test mode** and won't change anything on eBay until you turn live mode on.
 
-Use `npm run worker:once` for a single manual listing check.
+The full walkthrough is at **[nextinstock.com/docs](https://nextinstock.com/docs)**. Prefer to set up with an AI assistant? Follow [INSTALL_WITH_AI.md](INSTALL_WITH_AI.md).
 
-## How the handoff works
+## What it does
 
-1. Nextinstock reads the live listing and verifies the supported listing shape.
-2. The seller queues copies in selling order, with an internal reference and optional restock price for each. Single-item tasks also require a condition note and photos; variation tasks may store them internally if useful. Queue prices and order can be edited in the tool before a handoff.
-3. Photos are normalized to JPEG and stored locally.
-4. The worker watches the sold count. The listing remains at zero after the trigger sale. A live restock is scheduled after a persisted 60-second hold by default; the next worker check after that time begins the handoff. Set `NEXTINSTOCK_RESTOCK_DELAY_SECONDS` to adjust the hold (15–900 seconds).
-5. For a single-item task in live mode, the worker uploads the queued photos to eBay Picture Services and revises the listing's complete photo set, condition note, and optional planned price while quantity stays at zero.
-6. After reading back and verifying those details and the planned price, the worker restores one available unit. For a variation task, eBay requires the variation's price and nonzero quantity in the same revision, so the worker applies them together and verifies both by reading the listing back. The next queued copy then becomes first in line.
+- **Different copies:** each one has its own photos, condition, price and note. Buyers see exactly the copy they'll get.
+- **Same copies:** stack as many as you have on the listing's existing photos, and step the price up per copy if you want.
+- **Pace:** each copy goes up right away, after a wait you choose, or only when you say so.
+- **Variations:** pick the exact option and Next restocks that option's quantity and price.
+- **Discord alerts:** get a message on every sale and restock, plus a *Put it up* link when a copy is waiting on you.
+- **Local:** runs on your Mac. Your keys, photos and history never leave it.
 
-For a variation, the prepared mutation changes only that option's quantity and optional planned price. Internal copy photos and notes are optional; eBay retains its existing photos and the listing's shared condition note. Variation writes still require the normal live-write grant. eBay may reset automatic Best Offer thresholds when a fixed-price listing's price changes; review those settings if you use them.
+Works with active fixed-price, Good 'Til Cancelled listings with eBay's Out-of-Stock Control turned on.
 
-Each sale gets one idempotent handoff run. If eBay accepts a revision but confirmation fails, the next worker pass reads eBay first and reconciles the result before attempting another revision.
+<details>
+<summary><b>How a restock works</b></summary>
 
-## Local data
+1. The worker checks your listings every 30 seconds (`NEXTINSTOCK_POLL_SECONDS`).
+2. A sale takes the listing or variation to zero. Out-of-Stock Control keeps it alive.
+3. Next waits at least 60 seconds by default, or longer if you set a wait for that copy (`NEXTINSTOCK_RESTOCK_DELAY_SECONDS`, 15–900).
+4. For a single-item listing it uploads that copy's photos, updates the condition note and price, reads the listing back to confirm, then sets quantity to 1.
+5. For a variation, eBay needs price and quantity in one revision, so Next applies both together and confirms them.
+6. The next copy in line moves up.
 
-`npm run setup:local` sets `NEXTINSTOCK_DATA_DIR` to `~/Library/Application Support/Nextinstock` on macOS. Without that setting, the development fallback is `.nextinstock/`:
+Each sale gets exactly one handoff. If eBay accepts a change but the confirmation fails, the next check reads eBay first and reconciles before trying again. Changing a price can reset automatic Best Offer thresholds, so check those if you use them.
+</details>
 
-```text
-.nextinstock/
-├── nextinstock.sqlite
-├── images/
-└── secrets.json
-```
+<details>
+<summary><b>Turning on live restocks</b></summary>
 
-The directory is gitignored. Back it up like any other operational data. Set `NEXTINSTOCK_DATA_DIR` to place it on another local drive.
-
-The image layer is behind a storage-driver interface so Google Drive or object storage can replace local disk later. Local storage is intentionally not treated as durable on Vercel; a hosted worker should not be enabled until a persistent storage driver is added.
-
-## Enabling eBay writes
-
-An eBay read grant supports the read-only workflow, but Nextinstock requires a user grant containing this scope for writes:
+Reading listings only needs a read grant. Writing needs a grant with this scope:
 
 ```text
 https://api.ebay.com/oauth/api_scope/sell.inventory
 ```
 
-Before reconnecting:
+1. In the eBay developer portal, set your RuName's accepted URL to `https://<your-stable-host>/api/ebay/auth/callback`.
+2. In Next, open **Settings** and choose **Allow listing updates**.
+3. Let a dry run play out and check the history.
+4. Set `NEXTINSTOCK_EBAY_WRITE_MODE=live` in `.env.local` and restart `npm run start:local`.
 
-1. Configure the eBay developer RuName's accepted URL as `https://<your-stable-host>/api/ebay/auth/callback`.
-2. Open Settings in Nextinstock and reconnect eBay.
-3. Review a dry-run restock plan.
-4. Set `NEXTINSTOCK_EBAY_WRITE_MODE=live` and restart the app and worker.
+Live writes need both the `live` setting and the stored write grant. The environment variable alone unlocks nothing.
+</details>
 
-Live writes require both the explicit `live` setting and a locally stored Nextinstock grant with the write scope. Changing the environment variable alone does not unlock writes.
+<details>
+<summary><b>Where your data lives</b></summary>
 
-## Verification
+`npm run setup:local` points `NEXTINSTOCK_DATA_DIR` at `~/Library/Application Support/Nextinstock`, outside the project folder, so `git pull` never touches it. Without that setting it falls back to `.nextinstock/` (gitignored):
 
-```bash
-npm run check
-npm run build
-npm audit --omit=dev
+```text
+nextinstock.sqlite   listings, copies and history
+images/              copy photos
+secrets.json         eBay grant and Discord webhook (mode 600)
 ```
 
-The UI and API remain useful in dry-run mode: listing sync, task creation, local image persistence, sold-count checks, restock plans, activity history, and repeat-copy queuing all run without mutating eBay.
+Back it up like any other business data.
+</details>
 
-## Website
+## Updating
 
-The marketing site (`/` and `/docs`) deploys to Vercel. The hosted build blocks every local tool route (`/tool` and the task, eBay, photo, and settings APIs), so the tool only ever runs on your own machine.
+```bash
+git pull && npm ci && npm run build && npm run start:local
+```
+
+Your `.env.local` and data folder are left alone.
 
 ## Contributing
 
-Issues and pull requests are welcome. Run `npm run check`, `npm test`, and `npm run build` before opening a PR. Never commit `.env.local` or the data folder.
+Issues and pull requests are welcome. Before opening a PR, run:
+
+```bash
+npm run check && npm test && npm run build
+```
+
+Never commit `.env.local` or the data folder. The marketing site (`/` and `/docs`) deploys to Vercel, and the hosted build blocks every tool route, so the tool only runs on your own machine.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Independent software for eBay sellers, not affiliated with eBay.
