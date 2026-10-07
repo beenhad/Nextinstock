@@ -34,12 +34,23 @@ export function fixtureData(base) {
   return { listing, task, current, next };
 }
 
-export function installFixtureApi(page, base, { latencyMs = 120, initialTasks } = {}) {
+export function installFixtureApi(page, base, { latencyMs = 120, initialTasks, controller } = {}) {
   const data = fixtureData(base);
   let tasks = initialTasks ?? [structuredClone(data.task)];
   const json = (route, body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const reorder = (task) => { task.queuedCopies.forEach((c, i) => { c.queuePosition = i + 1; }); task.queuedCopy = task.queuedCopies[0] ?? null; };
+  if (controller) {
+    /** Simulate a sale: the first copy in line becomes the live listing. */
+    controller.sell = (taskId = tasks[0]?.id) => {
+      const task = tasks.find((t) => t.id === taskId);
+      const next = task?.queuedCopies.shift();
+      if (!next) return;
+      task.listing = { ...task.listing, quantitySold: task.listing.quantitySold + 1, price: next.targetPrice ?? task.listing.price,
+        imageUrls: next.photos.length ? [next.photos[0].url] : task.listing.imageUrls };
+      reorder(task);
+    };
+  }
   return page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;

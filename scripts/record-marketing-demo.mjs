@@ -1,176 +1,147 @@
-// Records the landing-page demo clips from the real /tool UI against fixture API data.
-// Usage: npm run dev, then `npm run record:demos` (CHROME_PATH overrides the browser).
+// Records the landing page "How it works" loops and the hero still from the real tool UI.
+// Usage: npm run build && npm run start (or dev), then `npm run record:demos`.
+// Uses the fixture API, so nothing touches eBay. CHROME_PATH overrides the browser.
 import { chromium } from "playwright";
-import ffmpegPath from "ffmpeg-static";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { execFile } from "node:child_process";
-import { installFixtureApi } from "./tool-fixture.mjs";
+import ffmpegPath from "ffmpeg-static";
+import { installFixtureApi, fixtureData } from "./tool-fixture.mjs";
 
 const run = promisify(execFile);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const output = join(root, "public", "demos");
 const scratch = await mkdtemp(join(tmpdir(), "nextinstock-capture-"));
 const base = process.env.NEXTINSTOCK_CAPTURE_URL ?? "http://127.0.0.1:3000";
-const WIDTH = 1600;
-const HEIGHT = 1000;
-const ZOOM = 1.6; // 1000x625 layout; clips record at 1000x625, posters at 1.6x for sharp stills
+const W = 1280, H = 800;
+const only = process.argv.slice(2);
 
-const captureCSS = `
-  html { scrollbar-width: none; }
-  html::-webkit-scrollbar { display: none; }
-  nextjs-portal, .tool-sidebar, .tool-topbar { display: none !important; }
-  .tool-shell { display: block !important; min-height: ${HEIGHT / ZOOM}px !important; background: #f7f7f8 !important; }
+const css = `
+  html { scrollbar-width: none; } html::-webkit-scrollbar { display: none; }
+  nextjs-portal, .tool-sidebar, .tool-topbar, .rl-back, .tool-toast { display: none !important; }
+  .tool-shell { display: block !important; background: #f7f7f8 !important; }
   .tool-main { margin: 0 !important; }
-  .tool-workspace { max-width: none !important; padding: 28px 36px !important; }
-  .tool-toast { position: fixed !important; right: 24px !important; bottom: 24px !important; }
-  .capture-cursor { position: fixed; z-index: 1000; top: 0; left: 0; display: none; width: 22px; height: 26px; pointer-events: none; filter: drop-shadow(0 1px 2px #0005); }
-  .capture-cursor svg { width: 100%; height: 100%; }
-  .capture-click { position: fixed; z-index: 999; width: 26px; height: 26px; border: 2px solid #3665f3; border-radius: 50%; opacity: 0; pointer-events: none; transform: translate(-50%, -50%); }
-  .capture-click.pulse { animation: capture-pulse 380ms ease-out; }
-  @keyframes capture-pulse { from { opacity: .8; scale: .4; } to { opacity: 0; scale: 1.7; } }
+  .tool-workspace { max-width: none !important; padding: 26px 34px !important; }
+  .cur { position: fixed; z-index: 1000; left: 0; top: 0; width: 20px; height: 24px; pointer-events: none; filter: drop-shadow(0 1px 2px #0005); display: none; }
+  .ring { position: fixed; z-index: 999; width: 26px; height: 26px; border: 2px solid #3665f3; border-radius: 50%; opacity: 0; pointer-events: none; transform: translate(-50%, -50%); }
+  .ring.p { animation: rp .38s ease-out; } @keyframes rp { from { opacity: .8; scale: .4; } to { opacity: 0; scale: 1.7; } }
 `;
-const sceneCSS = {
-  choose: "",
-  prepare: ".builder-heading { display: none !important; }",
-  restock: `.tool-page-heading, .tool-stat-row, .rb-toolbar { display: none !important; }
-    .tool-workspace { padding-top: 40px !important; }`,
-};
-
-const cursorScript = `
-  const cursor = document.createElement('div'); cursor.className = 'capture-cursor';
-  cursor.innerHTML = '<svg viewBox="0 0 24 28" xmlns="http://www.w3.org/2000/svg"><path d="M2 1v23l5.2-5.7 4.2 8 4-2-4.4-7.5H21Z" fill="white" stroke="#171717" stroke-width="1.7" stroke-linejoin="round"/></svg>';
-  const ring = document.createElement('div'); ring.className = 'capture-click';
-  document.body.append(cursor, ring);
-  document.addEventListener('pointermove', event => { cursor.style.display = 'block'; cursor.style.transform = 'translate3d('+event.clientX+'px,'+event.clientY+'px,0)'; });
-  document.addEventListener('pointerdown', event => { ring.style.left=event.clientX+'px'; ring.style.top=event.clientY+'px'; ring.classList.remove('pulse'); void ring.offsetWidth; ring.classList.add('pulse'); });
+const cursorJs = `
+  const c = document.createElement('div'); c.className = 'cur';
+  c.innerHTML = '<svg viewBox="0 0 24 28"><path d="M2 1v23l5.2-5.7 4.2 8 4-2-4.4-7.5H21Z" fill="white" stroke="#171717" stroke-width="1.7" stroke-linejoin="round"/></svg>';
+  const r = document.createElement('div'); r.className = 'ring'; document.body.append(c, r);
+  document.addEventListener('pointermove', e => { c.style.display = 'block'; c.style.transform = 'translate3d(' + e.clientX + 'px,' + e.clientY + 'px,0)'; });
+  document.addEventListener('pointerdown', e => { r.style.left = e.clientX + 'px'; r.style.top = e.clientY + 'px'; r.classList.remove('p'); void r.offsetWidth; r.classList.add('p'); });
 `;
 
-let pointer = { x: (WIDTH / ZOOM) * 0.62, y: (HEIGHT / ZOOM) * 0.7 };
-async function glideTo(page, locator) {
-  const box = await locator.boundingBox();
-  if (!box) throw new Error("Recording target is not visible");
-  const target = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  const steps = 34;
-  for (let i = 1; i <= steps; i += 1) {
-    const t = i / steps;
-    const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    await page.mouse.move(pointer.x + (target.x - pointer.x) * ease, pointer.y + (target.y - pointer.y) * ease);
-    await page.waitForTimeout(12);
-  }
-  pointer = target;
-  await page.waitForTimeout(160);
+const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" });
+
+async function scene(name, { tasks, record = true, width = W, height = H, scale = 1.25, open = true } = {}, script) {
+  if (only.length && !only.includes(name)) return;
+  const context = await browser.newContext({
+    viewport: { width, height }, deviceScaleFactor: scale,
+    ...(record ? { recordVideo: { dir: scratch, size: { width, height } } } : {}),
+  });
+  const page = await context.newPage();
+  const started = Date.now(); // the video's time zero
+  page.setDefaultTimeout(6000);
+  const controller = {};
+  await page.clock.install();
+  await installFixtureApi(page, base, { latencyMs: 80, initialTasks: tasks, controller });
+  await page.goto(`${base}/tool`, { waitUntil: "networkidle" });
+  await page.addStyleTag({ content: css });
+  await page.addScriptTag({ content: cursorJs });
+  if (open) { await page.locator(".lh-row").first().click(); await page.waitForTimeout(700); }
+  let at = { x: width * 0.6, y: height * 0.75 };
+  const glide = async (loc) => {
+    await loc.scrollIntoViewIfNeeded();
+    const box = await loc.boundingBox(); const to = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    for (let i = 1; i <= 18; i += 1) { const t = i / 18, e = t < .5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2; await page.mouse.move(at.x + (to.x - at.x) * e, at.y + (to.y - at.y) * e); await page.waitForTimeout(10); }
+    at = to; await page.waitForTimeout(90);
+  };
+  const click = async (loc) => {
+    await glide(loc);
+    // Layout can shift while images load; land on where the target is now.
+    const box = await loc.boundingBox(); at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await page.mouse.move(at.x, at.y); await page.mouse.down(); await page.waitForTimeout(50); await page.mouse.up();
+  };
+  const type = async (loc, text, delay = 45) => { await click(loc); await loc.pressSequentially(text, { delay }); };
+  await page.mouse.move(at.x, at.y);
+  await page.waitForTimeout(250);
+  const mark = (Date.now() - started) / 1000;
+  try { await script({ page, click, type, glide, controller, wait: (ms) => page.waitForTimeout(ms) }); } catch (error) { await page.screenshot({ path: join(root, "capture-error.png") }); throw error; }
+  const end = (Date.now() - started) / 1000;
+  const video = page.video();
+  await context.close();
+  if (!video) return;
+  const raw = await video.path();
+  const trim = ["-ss", String(Math.max(0, mark - 0.05)), "-to", String(end - 0.1)];
+  const vf = "setpts=PTS/1.25,fps=24,scale=1120:-2:flags=lanczos";
+  await run(ffmpegPath, ["-y", "-loglevel", "error", ...trim, "-i", raw, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "slow", "-crf", "28", "-pix_fmt", "yuv420p", "-movflags", "+faststart", join(output, `${name}.mp4`)]);
+  await run(ffmpegPath, ["-y", "-loglevel", "error", ...trim, "-i", raw, "-an", "-vf", vf, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "40", "-row-mt", "1", join(output, `${name}.webm`)]);
+  await run(ffmpegPath, ["-y", "-loglevel", "error", "-sseof", "-0.1", "-i", join(output, `${name}.mp4`), "-frames:v", "1", "-q:v", "4", join(output, `${name}.jpg`)]);
+  console.log("recorded", name);
 }
-async function click(page, locator) { await glideTo(page, locator); await page.mouse.down(); await page.waitForTimeout(70); await page.mouse.up(); }
 
-await mkdir(output, { recursive: true });
-const browser = await chromium.launch({ headless: true,
-  executablePath: process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" });
+const data = fixtureData(base);
+const empty = () => [{ ...structuredClone(data.task), queuedCopies: [], queuedCopy: null }];
 
-try {
-  for (const scene of (process.env.CAPTURE_SCENES?.split(",") ?? ["choose", "prepare", "restock"])) {
-    const context = await browser.newContext({ viewport: { width: WIDTH / ZOOM, height: HEIGHT / ZOOM }, deviceScaleFactor: ZOOM,
-      recordVideo: { dir: scratch, size: { width: WIDTH / ZOOM, height: HEIGHT / ZOOM } } });
-    const page = await context.newPage();
-    const videoStart = Date.now();
-    await installFixtureApi(page, base, { latencyMs: 180, initialTasks: scene === "restock" ? undefined : [] });
-    await page.goto(`${base}/tool`, { waitUntil: "networkidle" });
-    await page.addStyleTag({ content: captureCSS + sceneCSS[scene] });
-    await page.addScriptTag({ content: cursorScript });
-    pointer = { x: (WIDTH / ZOOM) * 0.62, y: (HEIGHT / ZOOM) * 0.7 };
+// 1 · Pick the listing
+await scene("choose", { tasks: [], open: false }, async ({ page, click, type, wait }) => {
+  await click(page.getByRole("button", { name: /Add a listing/ }).first()); await wait(350);
+  await type(page.getByLabel("eBay item number"), "900000000102", 35);
+  await click(page.getByRole("button", { name: /Sync eBay/ })); await page.clock.fastForward(500); await wait(700);
+  await click(page.getByRole("button", { name: /Line up copies/ })); await wait(1400);
+});
 
-    if (scene === "choose" || scene === "prepare") {
-      await page.getByRole("button", { name: /Add a listing|Add your first listing/ }).first().click();
-    }
-    if (scene === "prepare") {
-      await page.getByRole("textbox", { name: "eBay item number" }).fill("900000000102");
-      await page.getByRole("button", { name: /Sync eBay/ }).click();
-      await page.locator(".builder-listing-selected img").waitFor();
-      await page.getByRole("button", { name: /Continue/ }).click();
-      await page.getByRole("textbox", { name: /Condition note/ }).fill("");
-    }
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await page.mouse.move(pointer.x, pointer.y);
-    await page.waitForTimeout(700);
-    const clipStart = (Date.now() - videoStart) / 1000;
+// 2 · Line up your copies: one with its own photos, then a stack of the same
+await scene("prepare", { tasks: empty() }, async ({ page, click, type, wait }) => {
+  await wait(300);
+  await click(page.getByRole("button", { name: /A different copy/ })); await wait(250);
+  await page.locator(".rl-drop input[type=file]").setInputFiles(join(root, "public/demos/pokemon-xd-next.webp")); await wait(200);
+  await click(page.getByRole("radio", { name: /Good/ }));
+  await type(page.locator(".rl-editor .rl-money input").first(), "89.99");
+  await type(page.getByPlaceholder(/No manual/), "Disc only, tested", 22);
+  await click(page.getByRole("button", { name: /Add to the line/ })); await wait(600);
+  await click(page.locator('[data-key="node-add"]')); await wait(250);
+  await click(page.getByRole("button", { name: /Another of the same/ })); await wait(400);
+  const more = page.getByRole("button", { name: "One more" });
+  for (let i = 0; i < 3; i += 1) { await click(more); await wait(150); }
+  await wait(1300);
+});
 
-    if (scene === "choose") {
-      const input = page.getByRole("textbox", { name: "eBay item number" });
-      await click(page, input);
-      await input.pressSequentially("900000000102", { delay: 70 });
-      await page.waitForTimeout(300);
-      await click(page, page.getByRole("button", { name: /Sync eBay/ }));
-      await page.locator(".builder-listing-selected img").waitFor();
-      await page.waitForTimeout(400);
-      await glideTo(page, page.getByRole("button", { name: /Continue/ }));
-      await page.waitForTimeout(1600);
-    } else if (scene === "prepare") {
-      await click(page, page.locator(".builder-file-button"));
-      await page.locator(".builder-file-button input").setInputFiles(join(output, "pokemon-xd-next.webp"));
-      await page.waitForTimeout(600);
-      const reference = page.getByRole("textbox", { name: "Internal reference" });
-      await click(page, reference);
-      await reference.pressSequentially("GC-PKXD-009", { delay: 65 });
-      const note = page.getByRole("textbox", { name: /Condition note/ });
-      await click(page, note);
-      await note.pressSequentially("Complete in box. Disc tested.", { delay: 40 });
-      const price = page.getByRole("spinbutton", { name: /Price for this copy/ });
-      await click(page, price);
-      await price.pressSequentially("84.99", { delay: 80 });
-      await page.waitForTimeout(1500);
-    } else {
-      await page.waitForTimeout(500);
-      // Drag the third copy to the front of the line.
-      const tile = page.locator(".rb-tile").nth(2);
-      await glideTo(page, tile);
-      const grip = tile.locator(".rb-grip");
-      await glideTo(page, grip);
-      const from = await grip.boundingBox();
-      const to = await page.locator(".rb-tile").nth(0).boundingBox();
-      await page.mouse.down();
-      const steps = 30;
-      for (let i = 1; i <= steps; i += 1) {
-        const t = i / steps; const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-        await page.mouse.move(from.x + from.width / 2 + (to.x + 20 - from.x - from.width / 2) * ease, from.y + from.height / 2 + Math.sin(t * Math.PI) * -18);
-        await page.waitForTimeout(14);
-      }
-      pointer = { x: to.x + 20, y: from.y + from.height / 2 };
-      await page.waitForTimeout(150);
-      await page.mouse.up();
-      await page.waitForTimeout(700);
-      // Set a price rule and apply it to the queue.
-      await click(page, page.locator("button.rb-pill").first());
-      await page.waitForTimeout(250);
-      const stepInput = page.getByLabel("Change per sale");
-      await click(page, stepInput);
-      await stepInput.press("ControlOrMeta+a");
-      await stepInput.pressSequentially("2", { delay: 60 });
-      await page.waitForTimeout(500);
-      await click(page, page.getByRole("button", { name: /Reprice \d+ queued/ }));
-      await page.waitForTimeout(1100);
-      // A sale comes in: check eBay and watch the next copy go live.
-      await click(page, page.getByRole("button", { name: "Check eBay now" }));
-      await page.waitForTimeout(3200);
-    }
+// 3 · Set the pace: price steps up, then one copy waits for your OK
+await scene("pace", {}, async ({ page, click, type, wait }) => {
+  await wait(300);
+  await click(page.locator(".rl-node.is-run").first()); await wait(450);
+  await type(page.getByLabel("Change per copy"), "5", 80);
+  await click(page.getByRole("button", { name: "Apply" })); await wait(500);
+  await click(page.getByRole("radio", { name: "After a wait" })); await wait(400);
+  await click(page.locator('[data-key="link-copy-2"]')); await wait(350);
+  await click(page.getByRole("radio", { name: "When I say so" })); await wait(1300);
+});
 
-    await page.screenshot({ path: join(output, `${scene}.jpg`), type: "jpeg", quality: 88 });
-    const clipEnd = (Date.now() - videoStart) / 1000;
-    const recordedVideo = page.video();
-    await context.close();
-    const inputPath = await recordedVideo.path();
-    const start = Math.max(0, clipStart - 0.15).toFixed(2);
-    const duration = (clipEnd - clipStart + 0.15).toFixed(2);
-    const webm = join(output, `${scene}.webm`);
-    const mp4 = join(output, `${scene}.mp4`);
-    if (!ffmpegPath) throw new Error("ffmpeg-static is required to trim the clips");
-    await run(ffmpegPath, ["-y", "-i", inputPath, "-ss", start, "-t", duration, "-an", "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "30", "-row-mt", "1", webm]);
-    await run(ffmpegPath, ["-y", "-i", inputPath, "-ss", start, "-t", duration, "-an", "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", mp4]);
-    console.log(`${scene}: ${duration}s`);
+// 4 · It sells, the next copy goes live on the same listing
+await scene("restock", {}, async ({ page, controller, wait }) => {
+  await wait(900);
+  for (let i = 0; i < 2; i += 1) {
+    controller.sell(); await page.clock.fastForward(4100); await wait(1500);
   }
-} finally {
-  await browser.close();
-  await rm(scratch, { recursive: true, force: true });
-}
+  await wait(600);
+});
+
+// Hero still: the release line with a copy open
+await scene("hero", { record: false, width: 1040, height: 900, scale: 2 }, async ({ page, wait }) => {
+  await page.addStyleTag({ content: ".cur, .ring { display: none !important; } .tool-workspace { padding: 22px 26px !important; }" });
+  await page.keyboard.press("Escape"); await wait(400);
+  const box = await page.locator(".tool-workspace").boundingBox();
+  await page.screenshot({ path: join(scratch, "hero.png"), clip: { x: box.x, y: box.y, width: box.width, height: Math.min(box.height, 900) } });
+  await run(ffmpegPath, ["-y", "-loglevel", "error", "-i", join(scratch, "hero.png"), "-c:v", "libwebp", "-quality", "88", join(output, "hero-release-line.webp")]);
+  console.log("captured hero");
+});
+
+await browser.close();
+await rm(scratch, { recursive: true, force: true });

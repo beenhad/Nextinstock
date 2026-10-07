@@ -2,26 +2,33 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
+const clip = (name: string) => ({ video: `/demos/${name}.mp4?v=7`, webm: `/demos/${name}.webm?v=7`, poster: `/demos/${name}.jpg?v=7` });
+
 const steps = [
   {
     title: "Pick the listing", short: "Pick",
-    summary: "Choose the live listing you keep restocking. On a variation listing, pick the exact color or option.",
-    video: "/demos/choose.mp4?v=6", webm: "/demos/choose.webm?v=6", poster: "/demos/choose.jpg?v=6", fit: "fill",
+    summary: "Paste the item number of a listing you have more than one of.",
+    ...clip("choose"), fit: "fill",
   },
   {
-    title: "Queue the next copies", short: "Queue",
-    summary: "Give a copy its own photos, note, and price. Or add a stack of identical ones in one click.",
-    video: "/demos/prepare.mp4?v=6", webm: "/demos/prepare.webm?v=6", poster: "/demos/prepare.jpg?v=6", fit: "fill",
+    title: "Line up your copies", short: "Line up",
+    summary: "Different condition? Give a copy its own photos, grade, and price. Identical? Stack as many as you have.",
+    ...clip("prepare"), fit: "fill",
   },
   {
-    title: "It restocks on its own", short: "Restock",
-    summary: "Drag to reorder, set a price that climbs each sale, pick the timing. Next handles the rest.",
-    video: "/demos/restock.mp4?v=6", webm: "/demos/restock.webm?v=6", poster: "/demos/restock.jpg?v=6", fit: "fill",
+    title: "Set the pace", short: "Pace",
+    summary: "Raise the price with each sale, wait between releases, or hold a copy until you say so.",
+    ...clip("pace"), fit: "fill",
   },
   {
-    title: "Get the ping", short: "Alert",
-    summary: "Every sale and restock posts to your Discord, so you know it happened without opening eBay.",
-    video: "/demos/discord-detail.mp4?v=3", webm: "", poster: "/demos/discord-detail.jpg?v=2", fit: "framed",
+    title: "It sells, the next one goes up", short: "Restock",
+    summary: "The next copy goes live on the same item number. Same listing, same sold count.",
+    ...clip("restock"), fit: "fill",
+  },
+  {
+    title: "Get the alert", short: "Alert",
+    summary: "Discord tells you what sold and what went up. A copy waiting on you comes with a Put it up link.",
+    ...clip("discord"), fit: "framed",
   },
 ] as const;
 

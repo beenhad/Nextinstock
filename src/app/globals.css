@@ -5093,7 +5093,7 @@ textarea:focus-visible {
 html[data-vt="data"] .tool-workspace { view-transition-name: none; }
 html[data-vt="data"]::view-transition-old(root), html[data-vt="data"]::view-transition-new(root) { animation: none; }
 .rl-drop-grid[data-count="1"] { grid-template-columns: 1fr; }
-.rl-drop-grid[data-count="1"] img { aspect-ratio: auto; height: 100%; max-height: 260px; }
+.rl-drop-grid[data-count="1"] img { aspect-ratio: 1; height: auto; max-height: 200px; object-fit: contain; }
 .tool-toast { position: fixed; top: 18px; right: 50%; bottom: auto; transform: translateX(50%); z-index: 60; }
 @keyframes toolToastIn { from { opacity: 0; translate: 0 -8px; } }
 
@@ -5113,3 +5113,13 @@ html[data-vt="data"]::view-transition-old(root), html[data-vt="data"]::view-tran
 .settings-discord-hint { margin: 0; font-size: 13px; line-height: 1.5; }
 .settings-discord-hint code { font-size: 12px; background: #f3f4f7; padding: 1px 5px; border-radius: 6px; }
 .settings-discord-actions .is-quiet { color: #e53238; }
+
+/* A fresh copy just went live */
+.rl-node.is-live .rl-tile { animation: rlLivePop .55s var(--t-ease, ease) both; }
+@keyframes rlLivePop { 0% { transform: scale(.86); opacity: .4; } 60% { transform: scale(1.04); opacity: 1; } 100% { transform: none; } }
+
+/* Hero: a real shot of the release line, bleeding off the right edge */
+.hero-shot { display: block; width: min(900px, 140%); max-width: none; height: auto; border: 1px solid #e3e5ea; border-right: 0; border-radius: 18px 0 0 18px; background: #f3f4f7; box-shadow: 0 24px 60px -24px rgba(25, 30, 60, .28); }
+.hero-visual-wrap { justify-content: flex-start; overflow: hidden; }
+@media (max-width: 900px) { .hero-shot { width: 100%; border-right: 1px solid #e3e5ea; border-radius: 16px; } }
+.hero-copy h1 { max-width: 600px; font-size: clamp(40px, 4.3vw, 60px); line-height: 1; }

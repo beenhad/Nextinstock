@@ -170,7 +170,13 @@ export function ToolPrototype() {
       statusResponse.json() as Promise<{ status?: SystemStatus; error?: string }>,
     ]);
     if (!tasksResponse.ok) throw new Error(tasksPayload.error || "Could not load tasks");
-    setTasks(tasksPayload.tasks ?? []);
+    const fresh = tasksPayload.tasks ?? [];
+    const current = tasksRef.current;
+    // Never clobber an add that is still on its way to the server.
+    if (!current.some((task) => task.queuedCopies.some((copy) => copy.id.startsWith("pending-")))
+        && JSON.stringify(fresh) !== JSON.stringify(current)) {
+      if (current.length) withTransition(() => setTasks(fresh), "data"); else setTasks(fresh);
+    }
     setEvents(eventsPayload.events ?? []);
     setStatus(statusPayload.status ?? null);
   }, []);
@@ -182,6 +188,17 @@ export function ToolPrototype() {
     // The Discord "Approve" link opens the listing so the seller can confirm with one tap.
     const approveId = new URLSearchParams(window.location.search).get("approve");
     if (approveId) setOpenTaskId(approveId);
+  }, [reload]);
+
+  // Keep the screen current while it's open: a sale or restock shows up within a few seconds.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      const focused = document.activeElement?.tagName;
+      if (focused === "INPUT" || focused === "TEXTAREA") return;
+      void reload().catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(timer);
   }, [reload]);
 
   useEffect(() => {
@@ -595,9 +612,8 @@ function BuilderListing({
 }) {
   return (
     <div className="builder-content">
-      <span className="builder-kicker">Step 1 · Listing</span>
-      <h2>Select the listing to replenish</h2>
-      <p>Choose an active fixed-price listing, then choose the exact variation to restock.</p>
+      <h2>Which listing are you restocking?</h2>
+      <p>Paste its eBay item number and sync. If it has variations, pick the one you&apos;re restocking.</p>
       <div className="builder-search builder-live-search">
         <Search size={16} />
         <input value={itemId} onChange={(event) => onItemId(event.target.value.replace(/\D/g, ""))} aria-label="eBay item number" />

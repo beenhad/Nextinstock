@@ -264,7 +264,7 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={(event) => setDragging(String(event.active.id))} onDragEnd={dragEnd} onDragCancel={() => setDragging(null)}>
         <ol className="rl-flow" aria-label="Release order, first to sell on the left">
           <li className="rl-item">
-            <div className="rl-node is-live" data-key="node-live">
+            <div className="rl-node is-live" data-key="node-live" key={`${livePhoto}-${live}`}>
               <span className="rl-tile">{livePhoto ? <img src={livePhoto} alt="" draggable={false} /> : null}<span className="rl-flag">On eBay now</span></span>
               <span className="rl-price">{money(live, currency)}</span>
               <span className="rl-sub">Selling now</span>
