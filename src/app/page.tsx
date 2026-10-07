@@ -7,12 +7,12 @@ import { RepeatStockShowcase } from "@/components/repeat-stock-showcase";
 import { REPO_URL } from "@/lib/site";
 
 const sellerStories = [
-  { quote: "I price every box when I list it. Restocks never go up at an old price.", initials: "TC", who: "Sealed TCG seller", what: "Trading cards" },
-  { quote: "One copy in the case, three in the back. The listing restocks itself.", initials: "VG", who: "Used game shop", what: "Video games" },
-  { quote: "A color sells out and the next one is already queued. No option sits dark.", initials: "CR", who: "Controller refurbisher", what: "Video game accessories" },
-  { quote: "Each copy gets its own photos and grade. The sold count never resets.", initials: "VR", who: "Record seller", what: "Vinyl records" },
-  { quote: "Buyers see the exact unit they get. I never rebuild the listing.", initials: "RC", who: "Retro console seller", what: "Consoles" },
-  { quote: "I line it all up at night. Discord tells me when it restocks.", initials: "PT", who: "Part-time reseller", what: "Collectibles" },
+  { quote: "Had six sealed ETBs and was relisting one by hand every time it sold. Now I line them all up, bump each one a dollar, and go to bed. Woke up to two sales and the listing never went dark.", initials: "HH", who: "Holo Hollow", what: "Pokémon" },
+  { quote: "Every raw copy of the same rookie is a little different. I shoot each one, give it its own price, and the buyer gets the exact card in the photos. One listing, sold count keeps climbing.", initials: "TT", who: "Toploader Tuesday", what: "Sports cards" },
+  { quote: "One copy in the display case, four in the back. I used to forget to relist the second one sold. Now the next one is up before I'm done packing the first.", initials: "BR", who: "Back Room Bargains", what: "Video games" },
+  { quote: "Anything over a couple hundred I set to When I say so. Discord pings me, I give it a once-over, hit Put it up. Everything cheaper just runs on its own.", initials: "AG", who: "Attic Grails", what: "Collectibles" },
+  { quote: "I test every console myself and no two look the same. Each one gets its own photos and grade, and I haven't rebuilt a listing from scratch since.", initials: "CC", who: "Cartridge Cove", what: "Retro consoles" },
+  { quote: "Same pressing, different wear. I grade them, sort worst to best, and the cheap copies go first while the clean ones wait. Honestly kind of fun to watch.", initials: "GP", who: "Groove Pantry", what: "Vinyl records" },
 ];
 
 const faqs = [
@@ -89,7 +89,7 @@ export default function HomePage() {
         <div className="site-container">
           <div className="seller-stories-heading">
             <div>
-              <span className="section-kicker">Who it&apos;s for</span>
+              <span className="section-kicker">Seller stories</span>
               <h2>Anyone selling more than one of something.</h2>
             </div>
           </div>
@@ -104,7 +104,7 @@ export default function HomePage() {
             </div>
           </article>)}
         </div>
-        <div className="site-container"><p className="seller-stories-note">How different kinds of sellers put Next to work.</p></div>
+        <div className="site-container"><p className="seller-stories-note">Example stories showing how different sellers use Next. Store names are made up.</p></div>
       </section>
 
       <section className="oss-section" id="open-source">
@@ -177,7 +177,7 @@ export default function HomePage() {
           </div>
           <nav className="footer-nav" aria-label="Footer navigation">
             <a href="#how-it-works">How it works</a>
-            <a href="#sellers">Sellers</a>
+            <a href="#sellers">Stories</a>
             <a href="#open-source">Open source</a>
             <a href="#faq">FAQ</a>
             <a href="/docs">Setup guide</a>
