@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { discordWebhookUrl, restockDelaySeconds } from "./config";
+import { discordAlerts, discordWebhookUrl, publicAppUrl, restockDelaySeconds } from "./config";
 import { pendingDiscordNotifications, queueDiscordNotification, recordDiscordDelivery } from "./database";
 import type { ListingSnapshot, RestockPlan, WorkerResult } from "@/lib/types";
 
@@ -88,7 +88,7 @@ function restockAction(result: WorkerResult): string {
       : "No next copy queued · listing stays at 0. Add a copy to resume.";
   }
   if (result.action === "awaiting_approval") {
-    const base = (process.env.NEXTINSTOCK_PUBLIC_URL || "http://127.0.0.1:3000").replace(/\/$/, "");
+    const base = publicAppUrl();
     return `Next copy is ready${work ? `: ${work}` : "."}\n[Approve the restock](${base}/tool?approve=${encodeURIComponent(result.taskId)}) · opens Next on your computer`;
   }
   if (result.action === "dry_run_ready") {
@@ -183,6 +183,7 @@ export function buildPreviewDiscordPayload(listing: ListingSnapshot, at = new Da
     { ...base, action: "restocking" },
     { ...base, action: "restocked", listing: { ...atZero, quantityAvailable: 1 }, remainingQueuedCopies: 1 },
     { ...base, action: "restocked", listing: { ...atZero, quantityAvailable: 1 }, remainingQueuedCopies: 0 },
+    { ...base, action: "awaiting_approval" },
     { ...base, action: "held_at_zero", plan: { ...plan, copy: null } },
     { ...base, action: "dry_run_ready" },
     { ...base, action: "failed", message: "eBay did not confirm the queued revision" },
@@ -256,8 +257,18 @@ export async function sendDiscordMessage(webhookUrl: string, payload: DiscordWeb
   if (!response.ok) throw new Error("Discord returned HTTP " + response.status);
 }
 
+/** Which alert switch in Settings controls this kind of message. */
+export function alertGroup(action: WorkerResult["action"]): keyof ReturnType<typeof discordAlerts> | null {
+  if (action === "restock_scheduled") return "sales";
+  if (action === "restocking" || action === "restocked" || action === "dry_run_ready") return "restocks";
+  if (action === "awaiting_approval" || action === "held_at_zero" || action === "skipped" || action === "failed") return "needsYou";
+  return null;
+}
+
 export function queueWorkerDiscordUpdate(result: WorkerResult) {
   if (!discordWebhookUrl()) return;
+  const group = alertGroup(result.action);
+  if (!group || !discordAlerts()[group]) return;
   const payload = buildWorkerDiscordPayload(result);
   if (!payload) return;
   const sold = result.plan?.trigger.currentQuantitySold ?? result.listing.quantitySold;
