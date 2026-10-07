@@ -3,7 +3,7 @@
 // Uses the fixture API, so nothing touches eBay. CHROME_PATH overrides the browser.
 import { chromium } from "playwright";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,14 +39,13 @@ const cursorJs = `
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" });
 
-async function scene(name, { tasks, record = true, width = W, height = H, scale = 1.25, open = true } = {}, script) {
+// Frames come from a CDP screencast at 2x, not Playwright's recordVideo, which is 1x and heavily compressed.
+async function scene(name, { tasks, record = true, width = W, height = H, scale = 2, open = true } = {}, script) {
   if (only.length && !only.includes(name)) return;
-  const context = await browser.newContext({
-    viewport: { width, height }, deviceScaleFactor: scale,
-    ...(record ? { recordVideo: { dir: scratch, size: { width, height } } } : {}),
-  });
+  const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale });
   const page = await context.newPage();
-  const started = Date.now(); // the video's time zero
+  const frames = [];
+  let cdp = null;
   page.setDefaultTimeout(6000);
   const controller = {};
   await page.clock.install();
@@ -70,18 +69,35 @@ async function scene(name, { tasks, record = true, width = W, height = H, scale 
   };
   const type = async (loc, text, delay = 45) => { await click(loc); await loc.pressSequentially(text, { delay }); };
   await page.mouse.move(at.x, at.y);
+  if (record) {
+    cdp = await context.newCDPSession(page);
+    cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => { frames.push({ data, t: metadata.timestamp }); void cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => undefined); });
+    await cdp.send("Page.startScreencast", { format: "jpeg", quality: 94, maxWidth: width * scale, maxHeight: height * scale, everyNthFrame: 1 });
+  }
   await page.waitForTimeout(250);
-  const mark = (Date.now() - started) / 1000;
+  const mark = Date.now() / 1000;
   try { await script({ page, click, type, glide, controller, wait: (ms) => page.waitForTimeout(ms) }); } catch (error) { await page.screenshot({ path: join(root, "capture-error.png") }); throw error; }
-  const end = (Date.now() - started) / 1000;
-  const video = page.video();
+  const end = Date.now() / 1000;
+  if (cdp) { await cdp.send("Page.stopScreencast").catch(() => undefined); }
   await context.close();
-  if (!video) return;
-  const raw = await video.path();
-  const trim = ["-ss", String(Math.max(0, mark - 0.05)), "-to", String(end - 0.1)];
-  const vf = "setpts=PTS/1.25,fps=24,scale=1120:-2:flags=lanczos";
-  await run(ffmpegPath, ["-y", "-loglevel", "error", ...trim, "-i", raw, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "slow", "-crf", "28", "-pix_fmt", "yuv420p", "-movflags", "+faststart", join(output, `${name}.mp4`)]);
-  await run(ffmpegPath, ["-y", "-loglevel", "error", ...trim, "-i", raw, "-an", "-vf", vf, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "40", "-row-mt", "1", join(output, `${name}.webm`)]);
+  if (!record) return;
+  // Keep the last frame before the mark as the opening frame, then everything up to the end.
+  const firstIndex = Math.max(0, frames.findIndex((frame) => frame.t >= mark) - 1);
+  const kept = frames.slice(firstIndex).filter((frame) => frame.t <= end);
+  const dir = join(scratch, name); await mkdir(dir, { recursive: true });
+  let list = "";
+  for (let i = 0; i < kept.length; i += 1) {
+    const file = join(dir, `f${String(i).padStart(5, "0")}.jpg`);
+    await writeFile(file, Buffer.from(kept[i].data, "base64"));
+    const from = Math.max(kept[i].t, mark), to = i + 1 < kept.length ? kept[i + 1].t : end;
+    list += `file '${file}'\nduration ${Math.max(0.001, to - from).toFixed(4)}\n`;
+  }
+  list += `file '${join(dir, `f${String(kept.length - 1).padStart(5, "0")}.jpg`)}'\n`;
+  const listFile = join(dir, "list.txt"); await writeFile(listFile, list);
+  const input = ["-f", "concat", "-safe", "0", "-i", listFile];
+  const vf = "setpts=PTS/1.25,fps=30,scale=1600:-2:flags=lanczos";
+  await run(ffmpegPath, ["-y", "-loglevel", "error", ...input, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "slow", "-crf", "24", "-tune", "animation", "-pix_fmt", "yuv420p", "-movflags", "+faststart", join(output, `${name}.mp4`)]);
+  await run(ffmpegPath, ["-y", "-loglevel", "error", ...input, "-an", "-vf", vf, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "34", "-row-mt", "1", join(output, `${name}.webm`)]);
   await run(ffmpegPath, ["-y", "-loglevel", "error", "-sseof", "-0.1", "-i", join(output, `${name}.mp4`), "-frames:v", "1", "-q:v", "4", join(output, `${name}.jpg`)]);
   console.log("recorded", name);
 }

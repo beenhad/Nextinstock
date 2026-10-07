@@ -7,30 +7,12 @@ import { RepeatStockShowcase } from "@/components/repeat-stock-showcase";
 import { REPO_URL } from "@/lib/site";
 
 const sellerStories = [
-  {
-    quote: "Sealed boxes move a few bucks a week. I set the price on each box when I shoot it, so a restock never goes up at last month\u2019s number.",
-    initials: "ST", who: "Sealed TCG seller", what: "Booster boxes and ETBs",
-  },
-  {
-    quote: "One copy lives in the display case and three more are in the back. I shoot the backstock on a slow afternoon and that listing runs itself.",
-    initials: "UG", who: "Used game shop", what: "Storefront with an eBay side",
-  },
-  {
-    quote: "Every controller color is one variation listing. When a color sells out, the next one is already queued, so that option never sits dark.",
-    initials: "CR", who: "Controller refurbisher", what: "One variation listing, many colors",
-  },
-  {
-    quote: "Same pressing, different wear. Each copy gets its own photos and grade, and the listing keeps its sold count instead of starting over at zero.",
-    initials: "VR", who: "Record seller", what: "Multiple copies of the same LP",
-  },
-  {
-    quote: "Every console I sell is tested and a little different cosmetically. Buyers see the exact unit they get, and I never rebuild the listing.",
-    initials: "RC", who: "Retro console seller", what: "Tested, refurbished systems",
-  },
-  {
-    quote: "I list after my day job. I queue everything at night, and the Discord ping tells me a restock went through while I\u2019m at work.",
-    initials: "PT", who: "Part-time reseller", what: "Evenings and weekends",
-  },
+  { quote: "I price every box when I list it. Restocks never go up at an old price.", initials: "TC", who: "Sealed TCG seller", what: "Trading cards" },
+  { quote: "One copy in the case, three in the back. The listing restocks itself.", initials: "VG", who: "Used game shop", what: "Video games" },
+  { quote: "A color sells out and the next one is already queued. No option sits dark.", initials: "CR", who: "Controller refurbisher", what: "Video game accessories" },
+  { quote: "Each copy gets its own photos and grade. The sold count never resets.", initials: "VR", who: "Record seller", what: "Vinyl records" },
+  { quote: "Buyers see the exact unit they get. I never rebuild the listing.", initials: "RC", who: "Retro console seller", what: "Consoles" },
+  { quote: "I line it all up at night. Discord tells me when it restocks.", initials: "PT", who: "Part-time reseller", what: "Collectibles" },
 ];
 
 const faqs = [
