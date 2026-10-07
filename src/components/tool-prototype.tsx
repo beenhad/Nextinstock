@@ -40,13 +40,14 @@ import type { DistinctCopy, IdenticalCopies, QueueAction, TaskPatch } from "./to
 type ToolView = "tasks" | "activity" | "settings" | "support";
 
 /** Animate a state change with the View Transitions API when the browser has it. */
-function withTransition(update: () => void) {
-  const doc = typeof document === "undefined" ? null : document as Document & { startViewTransition?: (callback: () => void) => unknown };
+function withTransition(update: () => void, scope: "page" | "data" = "page") {
+  const doc = typeof document === "undefined" ? null : document as Document & { startViewTransition?: (callback: () => void) => { finished: Promise<void> } };
   if (doc?.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    doc.startViewTransition(() => flushSync(update));
-  } else {
-    update();
-  }
+    // Data updates only slide the nodes; the page itself must not fade.
+    if (scope === "data") document.documentElement.dataset.vt = "data";
+    const transition = doc.startViewTransition(() => flushSync(update));
+    transition.finished.finally(() => { delete document.documentElement.dataset.vt; });
+  } else update();
 }
 
 /** Apply task-level edits (order, prices, settings) locally before the server answers. */
@@ -232,7 +233,7 @@ export function ToolPrototype() {
     queueSequence.current.set(taskId, sequence);
     const nextTask = applyQueueAction(current, copyId, body);
     const commit = () => setTasks((list) => list.map((task) => task.id === taskId ? nextTask : task));
-    if (body.action === "move" || body.action === "remove") withTransition(commit);
+    if (body.action === "move" || body.action === "remove") withTransition(commit, "data");
     else commit();
     setError("");
     try {
@@ -261,10 +262,10 @@ export function ToolPrototype() {
     queueSequence.current.set(taskId, sequence);
     const nextTask = applyTaskPatch(current, patch);
     const commit = () => setTasks((list) => list.map((task) => task.id === taskId ? nextTask : task));
-    if (patch.order || patch.prices) withTransition(commit); else commit();
+    if (patch.order && !patch.fromDrag) withTransition(commit, "data"); else commit();
     setError("");
     try {
-      const response = await fetch(`/api/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      const response = await fetch(`/api/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...patch, fromDrag: undefined }) });
       const payload = await response.json() as { task?: RestockTask; error?: string };
       if (!response.ok || !payload.task) throw new Error(payload.error || "Could not save the change");
       if (queueSequence.current.get(taskId) === sequence) {
@@ -339,7 +340,7 @@ export function ToolPrototype() {
       const response = await fetch(`/api/tasks/${taskId}/copies`, { method: "POST", body: form });
       const payload = await response.json() as { task?: RestockTask; error?: string };
       if (!response.ok || !payload.task) throw new Error(payload.error || "Could not add the copy");
-      withTransition(() => setTasks((list) => list.map((task) => task.id === taskId ? payload.task! : task)));
+      flushSync(() => setTasks((list) => list.map((task) => task.id === taskId ? payload.task! : task)));
       showToast("Added to the line");
       return payload.task;
     } catch (caught) {

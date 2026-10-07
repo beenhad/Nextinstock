@@ -191,7 +191,7 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
     if (from < 0 || to < 0) return;
     const moved = [...units];
     moved.splice(to, 0, ...moved.splice(from, 1));
-    void actions.onPatch({ order: moved.flatMap((unit) => unitCopies(unit).map((copy) => copy.id)) });
+    void actions.onPatch({ order: moved.flatMap((unit) => unitCopies(unit).map((copy) => copy.id)), fromDrag: true });
   }
 
   const graded = copies.filter((copy) => copy.grade).length;
@@ -722,7 +722,7 @@ function NewCopyForm({ index, live, currency, onCancel, onSave }: {
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") fileInput.current?.click(); }}
     >
       {previews.length
-        ? <div className="rl-drop-grid">{previews.slice(0, 4).map((url) => <img key={url} src={url} alt="" />)}{files.length > 4 && <span>+{files.length - 4}</span>}</div>
+        ? <div className="rl-drop-grid" data-count={Math.min(files.length, 4)}>{previews.slice(0, 4).map((url) => <img key={url} src={url} alt="" />)}{files.length > 4 && <span>+{files.length - 4}</span>}</div>
         : <span className="rl-drop-empty"><ImagePlus size={26} strokeWidth={1.6} aria-hidden="true" /><strong>Add photos</strong><small>Drop them here or click</small></span>}
       <input ref={fileInput} type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif" hidden onChange={(event) => take(event.target.files)} />
     </div>

@@ -5088,3 +5088,11 @@ textarea:focus-visible {
 
 .rl-quiet { white-space: nowrap; }
 .rl-count-stepper { justify-self: start; }
+
+/* Data updates: nodes slide, page never fades. */
+html[data-vt="data"] .tool-workspace { view-transition-name: none; }
+html[data-vt="data"]::view-transition-old(root), html[data-vt="data"]::view-transition-new(root) { animation: none; }
+.rl-drop-grid[data-count="1"] { grid-template-columns: 1fr; }
+.rl-drop-grid[data-count="1"] img { aspect-ratio: auto; height: 100%; max-height: 260px; }
+.tool-toast { position: fixed; top: 18px; right: 50%; bottom: auto; transform: translateX(50%); z-index: 60; }
+@keyframes toolToastIn { from { opacity: 0; translate: 0 -8px; } }
