@@ -5160,3 +5160,8 @@ html[data-vt="data"]::view-transition-old(root), html[data-vt="data"]::view-tran
 }
 
 img, video { -webkit-user-drag: none; user-drag: none; }
+.seller-story-card:nth-child(4) .seller-story-quote-mark { color: #c98a00; }
+.seller-story-card:nth-child(4) .seller-story-avatar { background: #fff3d6; color: #7a5600; }
+.seller-story-card:nth-child(5) .seller-story-quote-mark { color: var(--nis-blue-dark); }
+.seller-story-card:nth-child(6) .seller-story-quote-mark { color: var(--nis-red); }
+.seller-story-card:nth-child(6) .seller-story-avatar { background: #ffe5e6; color: #a7272e; }
