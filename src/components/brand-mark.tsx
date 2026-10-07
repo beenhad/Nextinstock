@@ -1,4 +1,4 @@
-export function BrandMark({ compact = false, tag = true }: { compact?: boolean; tag?: boolean }) {
+export function BrandMark({ compact = false }: { compact?: boolean; tag?: boolean }) {
   if (compact) {
     return (
       <span className="brand-mark brand-mark-compact" aria-label="Next in stock" />
@@ -13,7 +13,7 @@ export function BrandMark({ compact = false, tag = true }: { compact?: boolean; 
         <span className="brand-letter brand-letter-yellow">x</span>
         <span className="brand-letter brand-letter-green">t</span>
       </span>
-      {tag && <span className="brand-tag" aria-hidden="true"><span>in</span><span>stock</span></span>}
+      
     </span>
   );
 }
