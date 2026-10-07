@@ -28,6 +28,7 @@ const COLORS = {
   restocking: 0x3155f5,
   dry_run_ready: 0x3155f5,
   held_at_zero: 0xe6a23c,
+  awaiting_approval: 0xe6a23c,
   skipped: 0xe6a23c,
   restocked: 0x2ea66f,
   failed: 0xdc5252,
@@ -85,6 +86,10 @@ function restockAction(result: WorkerResult): string {
     return copy
       ? "Queued copy needs work. Listing stays at 0 until it is ready."
       : "No next copy queued · listing stays at 0. Add a copy to resume.";
+  }
+  if (result.action === "awaiting_approval") {
+    const base = (process.env.NEXTINSTOCK_PUBLIC_URL || "http://127.0.0.1:3000").replace(/\/$/, "");
+    return `Next copy is ready${work ? `: ${work}` : "."}\n[Approve the restock](${base}/tool?approve=${encodeURIComponent(result.taskId)}) · opens Next on your computer`;
   }
   if (result.action === "dry_run_ready") {
     return `Live writes off · listing stays at 0.${work ? `\nPrepared: ${work}` : ""}`;
@@ -197,6 +202,7 @@ export function buildWorkerDiscordPayload(result: WorkerResult, at = new Date())
     restocking: { title: "🔵 RESTOCKING" },
     dry_run_ready: { title: "🔵 RESTOCK READY · DRY RUN" },
     held_at_zero: { title: "🟠 RESTOCK ON HOLD" },
+    awaiting_approval: { title: "🟡 SOLD · WAITING FOR YOUR OK" },
     skipped: { title: "🟠 RESTOCK NEEDS REVIEW" },
     restocked: { title: "🟢 RESTOCKED" },
     failed: { title: "🔴 RESTOCK NEEDS ATTENTION" },

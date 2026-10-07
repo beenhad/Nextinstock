@@ -82,7 +82,7 @@ test("variation plan reads the selected option and leaves buyer-facing photos an
     queuedCopies: [],
     queuedCopy: {
       id: "copy", taskId: "orange-task", queuePosition: 1, internalReference: "ORANGE", targetPrice: 64.99, conditionId: "3000",
-      conditionName: "Very Good", conditionDescription: "", status: "queued", photos: [], createdAt: "2026-10-02",
+      conditionName: "Very Good", conditionDescription: "", releaseDelaySeconds: null, needsApproval: false, grade: null, status: "queued", photos: [], createdAt: "2026-10-02",
     },
   };
   const plan = buildRestockPlan(task);
@@ -109,7 +109,7 @@ test("an identical copy keeps the live photos and condition note and only repric
 
 test("plan for an identical single-item copy skips photo upload", () => {
   const snapshot = { ...listing, variations: [], unsupportedReasons: [], quantitySold: 3, quantityAvailable: 0, itemId: "900000000301" } as unknown as ListingSnapshot;
-  const copy = { id: "same-1", taskId: "same-task", queuePosition: 1, internalReference: "SAME-1", targetPrice: 31.99, conditionId: "3000", conditionName: "Good", conditionDescription: "", status: "queued" as const, photos: [], createdAt: "2026-10-05" };
+  const copy = { id: "same-1", taskId: "same-task", queuePosition: 1, internalReference: "SAME-1", targetPrice: 31.99, conditionId: "3000", conditionName: "Good", conditionDescription: "", releaseDelaySeconds: null, needsApproval: false, grade: null, status: "queued" as const, photos: [], createdAt: "2026-10-05" };
   const task: RestockTask = {
     id: "same-task", itemId: "900000000301", variationKey: null, status: "active", restockDelaySeconds: 300, priceRule: null,
     armedQuantitySold: 3, lastSeenQuantitySold: 3, lastSeenQuantityAvailable: 0, lastCheckedAt: null, lastError: null,

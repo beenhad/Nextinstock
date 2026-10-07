@@ -99,7 +99,7 @@ export function pollSeconds(): number {
 }
 
 export const MIN_RESTOCK_DELAY_SECONDS = 15;
-export const MAX_RESTOCK_DELAY_SECONDS = 24 * 60 * 60;
+export const MAX_RESTOCK_DELAY_SECONDS = 7 * 24 * 60 * 60;
 
 export function clampRestockDelay(value: number): number {
   return Math.max(MIN_RESTOCK_DELAY_SECONDS, Math.min(MAX_RESTOCK_DELAY_SECONDS, Math.trunc(value)));

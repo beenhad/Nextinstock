@@ -19,6 +19,7 @@ export async function PATCH(request: Request, context: Params) {
     const body = await request.json() as {
       action?: string; targetPrice?: string | null; direction?: string;
       internalReference?: string; conditionDescription?: string;
+      releaseDelaySeconds?: number | null; needsApproval?: boolean; grade?: string | null;
     };
     const task = body.action === "price"
       ? updateQueuedCopyPrice(taskId, copyId, parseTargetPrice(body.targetPrice ?? null))
@@ -28,6 +29,9 @@ export async function PATCH(request: Request, context: Params) {
           ? updateQueuedCopyDetails(taskId, copyId, {
             internalReference: typeof body.internalReference === "string" ? body.internalReference : undefined,
             conditionDescription: typeof body.conditionDescription === "string" ? body.conditionDescription : undefined,
+            releaseDelaySeconds: body.releaseDelaySeconds === null || typeof body.releaseDelaySeconds === "number" ? body.releaseDelaySeconds : undefined,
+            needsApproval: typeof body.needsApproval === "boolean" ? body.needsApproval : undefined,
+            grade: body.grade === null || typeof body.grade === "string" ? body.grade : undefined,
           })
           : null;
     if (!task) return NextResponse.json({ error: "Invalid queue action" }, { status: 400 });

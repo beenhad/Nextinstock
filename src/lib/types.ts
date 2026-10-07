@@ -5,6 +5,7 @@ export type TaskStatus =
   | "processing"
   | "scheduled"
   | "dry_run_ready"
+  | "awaiting_approval"
   | "attention"
   | "error";
 
@@ -72,10 +73,18 @@ export interface QueuedCopy {
   conditionId: string | null;
   conditionName: string | null;
   conditionDescription: string;
+  /** Seconds to wait after the previous copy sells; null uses the listing/app default. */
+  releaseDelaySeconds: number | null;
+  /** Hold this copy until the seller approves it in Next or from the Discord alert. */
+  needsApproval: boolean;
+  /** Seller's own condition grade, used to color and sort the release line. */
+  grade: CopyGrade | null;
   status: "queued" | "applying" | "live" | "archived" | "failed";
   photos: TaskPhoto[];
   createdAt: string;
 }
+
+export type CopyGrade = "fair" | "good" | "great" | "new";
 
 /** How each queued copy's price moves away from the one before it. */
 export interface PriceRule {
@@ -173,6 +182,7 @@ export interface WorkerResult {
     | "waiting_for_restock"
     | "restocking"
     | "held_at_zero"
+    | "awaiting_approval"
     | "dry_run_ready"
     | "restocked"
     | "skipped"

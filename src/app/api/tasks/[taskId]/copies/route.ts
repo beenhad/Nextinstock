@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { addQueuedCopy, getTask } from "@/lib/server/database";
+import { MAX_QUEUED_COPIES, addQueuedCopy, getTask } from "@/lib/server/database";
 import { fetchListing } from "@/lib/server/ebay";
 import { storeTaskImages } from "@/lib/server/storage";
 import { parseTargetPrice } from "@/lib/server/price";
@@ -26,6 +26,9 @@ export async function POST(
     const conditionDescription = String(form.get("conditionDescription") ?? "").trim().slice(0, 1000);
     const files = form.getAll("photos").filter((value): value is File => value instanceof File);
     const count = files.length ? 1 : Math.trunc(Number(form.get("count") ?? 1));
+    const rawDelay = form.get("releaseDelaySeconds");
+    const releaseDelaySeconds = rawDelay === null || rawDelay === "" ? null : Number(rawDelay);
+    const needsApproval = form.get("needsApproval") === "true";
     const startIndex = form.get("startIndex") === null ? null : Math.max(1, Math.trunc(Number(form.get("startIndex"))) || 1);
     if (!internalReference) {
       return NextResponse.json({ error: "Add a reference for this copy" }, { status: 400 });
@@ -33,8 +36,8 @@ export async function POST(
     if (!Number.isFinite(count) || count < 1 || count > 50) {
       return NextResponse.json({ error: "Add between 1 and 50 copies at a time" }, { status: 400 });
     }
-    if (current.queuedCopies.length + count > 100) {
-      return NextResponse.json({ error: "A listing can queue at most 100 copies" }, { status: 400 });
+    if (current.queuedCopies.length + count > MAX_QUEUED_COPIES) {
+      return NextResponse.json({ error: `A listing can line up at most ${MAX_QUEUED_COPIES} copies` }, { status: 400 });
     }
     if (!current.variationKey && files.length && !conditionDescription) {
       return NextResponse.json({ error: "Add the condition note for this copy" }, { status: 400 });
@@ -70,6 +73,9 @@ export async function POST(
         internalReference: count > 1 || startIndex !== null ? `${internalReference}-${(startIndex ?? 1) + index}`.slice(0, 100) : internalReference,
         conditionDescription,
         targetPrice: prices[index],
+        releaseDelaySeconds: releaseDelaySeconds !== null && Number.isFinite(releaseDelaySeconds) ? releaseDelaySeconds : null,
+        needsApproval,
+        grade: String(form.get("grade") ?? "") || null,
         images,
       });
     }

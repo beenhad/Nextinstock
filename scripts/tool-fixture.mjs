@@ -11,18 +11,20 @@ export function fixtureData(base) {
     imageUrls: [current], variationCount: 0, variations: [], variationPictureAxis: null,
     outOfStockControl: true, supported: true, unsupportedReasons: [], fetchedAt: now,
   };
-  const copy = (n, ref, note, price, photo) => ({
+  const copy = (n, ref, note, price, photo, grade = null) => ({
     id: `copy-${n}`, taskId: "demo-task", queuePosition: n, internalReference: ref, targetPrice: price,
-    conditionId: "3000", conditionName: "Good", conditionDescription: note, status: "queued", createdAt: now,
+    conditionId: "3000", conditionName: "Good", conditionDescription: note, releaseDelaySeconds: null, needsApproval: false, grade,
+    status: "queued", createdAt: now,
     photos: [{ id: `photo-${n}`, copyId: `copy-${n}`, position: 1, originalName: "copy.webp", mimeType: "image/webp",
       byteSize: 200000, width: 1600, height: 1600, sha256: "demo", url: photo, ebayImageId: null, ebayImageUrl: null }],
   });
   const copies = [
-    copy(1, "GC-PKXD-009", "Complete in box. Disc tested.", 84.99, next),
-    copy(2, "GC-PKXD-010", "Case has a small crack on the back. Disc clean.", 79.99, current),
-    copy(3, "GC-PKXD-011", "No manual. Disc light scratches, tested.", 69.99, next),
-    { ...copy(4, "PKXD-SAME-1", "", 86.99, next), photos: [] },
-    { ...copy(5, "PKXD-SAME-2", "", 88.99, next), photos: [] },
+    copy(1, "PKXD-011", "No manual. Light disc scratches, tested.", 89.99, next, "good"),
+    copy(2, "PKXD-009", "Complete in box, case wear on spine.", 94.99, current, "good"),
+    { ...copy(3, "PKXD-012", "Complete, near-mint disc and manual.", 109.99, next, "great"), releaseDelaySeconds: 172800 },
+    { ...copy(4, "SAME-1", "", 109.99, next), photos: [], needsApproval: true },
+    { ...copy(5, "SAME-2", "", 112.99, next), photos: [] },
+    { ...copy(6, "SAME-3", "", 115.99, next), photos: [] },
   ];
   const task = {
     id: "demo-task", itemId: listing.itemId, variationKey: null, status: "active", restockDelaySeconds: null, priceRule: null, listing,
@@ -43,6 +45,18 @@ export function installFixtureApi(page, base, { latencyMs = 120, initialTasks } 
     const path = new URL(request.url()).pathname;
     const method = request.method();
     if (path === "/api/tasks" && method === "GET") return json(route, { tasks });
+    if (path === "/api/tasks" && method === "POST") {
+      await wait(latencyMs);
+      const created = { ...structuredClone(data.task), id: `task-${tasks.length + 1}`, queuedCopies: [], queuedCopy: null };
+      tasks.unshift(created);
+      return json(route, { task: created }, 201);
+    }
+    const approveMatch = path.match(/^\/api\/tasks\/([^/]+)\/approve$/);
+    if (approveMatch) {
+      const task = tasks.find((t) => t.id === approveMatch[1]);
+      task.status = "active";
+      return json(route, { approved: true, task });
+    }
     if (path === "/api/activity") return json(route, { events: [] });
     if (path === "/api/system/status") return json(route, { status: {
       ebayConfigured: true, ebayCredentialSource: "nextinstock", writeMode: "dry-run", storageDriver: "local",
@@ -72,11 +86,21 @@ export function installFixtureApi(page, base, { latencyMs = 120, initialTasks } 
       const count = Number(field("count") ?? 1);
       const prices = field("prices") ? JSON.parse(field("prices")) : [];
       const start = Number(field("startIndex") ?? 1);
+      if (/name="photos"/.test(text)) {
+        const n = task.queuedCopies.length + 200;
+        task.queuedCopies.push({ id: `copy-${n}`, taskId: task.id, queuePosition: n, internalReference: field("internalReference"),
+          targetPrice: field("targetPrice") ? Number(field("targetPrice")) : null, conditionId: "3000", conditionName: "Good",
+          conditionDescription: field("conditionDescription") ?? "", releaseDelaySeconds: null, needsApproval: false, grade: field("grade") || null,
+          status: "queued", createdAt: new Date().toISOString(),
+          photos: [{ id: `p-${n}`, copyId: `copy-${n}`, position: 0, originalName: "x.webp", mimeType: "image/webp", byteSize: 1, width: 1, height: 1, sha256: "x", url: data.next, ebayImageId: null, ebayImageUrl: null }] });
+        reorder(task);
+        return json(route, { task }, 201);
+      }
       for (let i = 0; i < count; i += 1) {
         const n = task.queuedCopies.length + 100 + i;
         task.queuedCopies.push({ id: `copy-${n}`, taskId: task.id, queuePosition: n, internalReference: `${field("internalReference")}-${start + i}`,
           targetPrice: prices[i] === null || prices[i] === undefined ? null : Number(prices[i]), conditionId: "3000", conditionName: "Good",
-          conditionDescription: "", status: "queued", createdAt: new Date().toISOString(), photos: [] });
+          conditionDescription: "", releaseDelaySeconds: null, needsApproval: false, grade: null, status: "queued", createdAt: new Date().toISOString(), photos: [] });
       }
       reorder(task);
       return json(route, { task }, 201);
@@ -91,7 +115,7 @@ export function installFixtureApi(page, base, { latencyMs = 120, initialTasks } 
         const body = request.postDataJSON();
         const c = task.queuedCopies[index];
         if (body.action === "price") c.targetPrice = body.targetPrice ? Number(body.targetPrice) : null;
-        if (body.action === "details") Object.assign(c, Object.fromEntries(Object.entries({ internalReference: body.internalReference, conditionDescription: body.conditionDescription }).filter(([, v]) => v !== undefined)));
+        if (body.action === "details") Object.assign(c, Object.fromEntries(Object.entries({ internalReference: body.internalReference, conditionDescription: body.conditionDescription, releaseDelaySeconds: body.releaseDelaySeconds, needsApproval: body.needsApproval, grade: body.grade }).filter(([, v]) => v !== undefined)));
         if (body.action === "move") { const j = index + (body.direction === "up" ? -1 : 1); [task.queuedCopies[index], task.queuedCopies[j]] = [task.queuedCopies[j], task.queuedCopies[index]]; }
       }
       reorder(task);
