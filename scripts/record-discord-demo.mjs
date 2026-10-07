@@ -81,7 +81,7 @@ await page.waitForTimeout(400);
 const frames = [];
 const cdp = await page.context().newCDPSession(page);
 cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => { frames.push({ data, t: metadata.timestamp }); void cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => undefined); });
-await cdp.send("Page.startScreencast", { format: "jpeg", quality: 94, maxWidth: 1280, maxHeight: 1200, everyNthFrame: 1 });
+await cdp.send("Page.startScreencast", { format: "png", maxWidth: 1280, maxHeight: 1200, everyNthFrame: 1 });
 await page.waitForTimeout(150);
 const mark = Date.now() / 1000;
 await page.evaluate(() => document.body.classList.add("go"));
@@ -94,17 +94,16 @@ const firstIndex = Math.max(0, frames.findIndex((frame) => frame.t >= mark) - 1)
 const kept = frames.slice(firstIndex).filter((frame) => frame.t <= end);
 let list = "";
 for (let i = 0; i < kept.length; i += 1) {
-  const file = join(scratch, `f${String(i).padStart(5, "0")}.jpg`);
+  const file = join(scratch, `f${String(i).padStart(5, "0")}.png`);
   await writeFile(file, Buffer.from(kept[i].data, "base64"));
   const from = Math.max(kept[i].t, mark), to = i + 1 < kept.length ? kept[i + 1].t : end;
   list += `file '${file}'\nduration ${Math.max(0.001, to - from).toFixed(4)}\n`;
 }
-list += `file '${join(scratch, `f${String(kept.length - 1).padStart(5, "0")}.jpg`)}'\n`;
+list += `file '${join(scratch, `f${String(kept.length - 1).padStart(5, "0")}.png`)}'\n`;
 await writeFile(join(scratch, "list.txt"), list);
 const input = ["-f", "concat", "-safe", "0", "-i", join(scratch, "list.txt")];
 const vf = "fps=30,scale=1280:-2:flags=lanczos";
-await run(ffmpegPath, ["-y", "-loglevel", "error", ...input, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "slow", "-crf", "24", "-tune", "animation", "-pix_fmt", "yuv420p", "-movflags", "+faststart", join(output, "discord.mp4")]);
-await run(ffmpegPath, ["-y", "-loglevel", "error", ...input, "-an", "-vf", vf, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "34", "-row-mt", "1", join(output, "discord.webm")]);
+await run(ffmpegPath, ["-y", "-loglevel", "error", ...input, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "slow", "-crf", "17", "-tune", "animation", "-pix_fmt", "yuv420p", "-movflags", "+faststart", join(output, "discord.mp4")]);
 await run(ffmpegPath, ["-y", "-loglevel", "error", "-sseof", "-0.1", "-i", join(output, "discord.mp4"), "-frames:v", "1", "-q:v", "3", join(output, "discord.jpg")]);
 await rm(scratch, { recursive: true, force: true });
 console.log("recorded discord");

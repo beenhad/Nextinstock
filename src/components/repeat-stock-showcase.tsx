@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-const clip = (name: string) => ({ video: `/demos/${name}.mp4?v=9`, webm: `/demos/${name}.webm?v=9`, poster: `/demos/${name}.jpg?v=9` });
+const clip = (name: string) => ({ video: `/demos/${name}.mp4?v=10`, poster: `/demos/${name}.jpg?v=10` });
 
 const steps = [
   {
@@ -111,7 +111,6 @@ export function RepeatStockShowcase() {
           onTimeUpdate={(event) => { const v = event.currentTarget; if (v.duration) setProgress(v.currentTime / v.duration); }}
           onEnded={handleEnded}
         >
-          {step.webm && <source src={step.webm} type="video/webm" />}
           <source src={step.video} type="video/mp4" />
         </video>
         <span className={`steps-play-state ${playing ? "" : "is-paused"}`} aria-hidden="true">{playing ? "" : "Play"}</span>
