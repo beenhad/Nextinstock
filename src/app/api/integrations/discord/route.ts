@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { discordWebhookUrl, saveDiscordWebhookUrl } from "@/lib/server/config";
+import { discordWebhookUrl, saveDiscordAlerts, saveDiscordWebhookUrl } from "@/lib/server/config";
 import { buildPreviewDiscordPayload, buildTestDiscordPayload, configureDiscordWebhook, sendDiscordMessage, validateDiscordWebhookUrl } from "@/lib/server/discord";
 import { fetchSellerPreviewListing } from "@/lib/server/ebay";
 import { saleTriggerState } from "@/lib/server/sale-trigger";
@@ -20,7 +20,12 @@ function localRequest(request: Request) {
 export async function POST(request: Request) {
   if (!localRequest(request)) return NextResponse.json({ error: "Open the local app to change Discord settings." }, { status: 403 });
   try {
-    const body = await request.json() as { action?: string; webhookUrl?: string };
+    const body = await request.json() as { action?: string; webhookUrl?: string; alerts?: Record<string, unknown> };
+    if (body.action === "alerts") {
+      const alerts = body.alerts ?? {};
+      saveDiscordAlerts(Object.fromEntries(["sales", "restocks", "needsYou"].filter((key) => typeof alerts[key] === "boolean").map((key) => [key, alerts[key] as boolean])));
+      return NextResponse.json({ saved: true });
+    }
     if (body.action === "connect") {
       const url = validateDiscordWebhookUrl(body.webhookUrl ?? "");
       saveDiscordWebhookUrl(url);

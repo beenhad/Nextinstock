@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
-import type { EbayWriteMode, SystemStatus } from "@/lib/types";
+import type { EbayWriteMode, SystemStatus, DiscordAlerts } from "@/lib/types";
 
 loadDotenv({
   path: path.join(process.cwd(), ".env.local"),
@@ -32,6 +32,7 @@ interface LocalSecrets {
   ebayRefreshToken?: string;
   ebayGrantedScopes?: string[];
   discordWebhookUrl?: string;
+  discordAlerts?: Partial<DiscordAlerts>;
   updatedAt?: string;
 }
 
@@ -56,6 +57,24 @@ export function saveLocalEbayGrant(refreshToken: string, scopes: string[]) {
 
 export function discordWebhookUrl(): string | null {
   return readLocalSecrets().discordWebhookUrl?.trim() || null;
+}
+
+export function discordAlerts(): DiscordAlerts {
+  const saved = readLocalSecrets().discordAlerts ?? {};
+  return { sales: saved.sales !== false, restocks: saved.restocks !== false, needsYou: saved.needsYou !== false };
+}
+
+export function saveDiscordAlerts(alerts: Partial<DiscordAlerts>) {
+  const payload = readLocalSecrets();
+  const next = { ...discordAlerts(), ...alerts };
+  payload.discordAlerts = { sales: Boolean(next.sales), restocks: Boolean(next.restocks), needsYou: Boolean(next.needsYou) };
+  payload.updatedAt = new Date().toISOString();
+  writeFileSync(secretsPath(), JSON.stringify(payload, null, 2), { mode: 0o600 });
+  chmodSync(secretsPath(), 0o600);
+}
+
+export function publicAppUrl(): string {
+  return (process.env.NEXTINSTOCK_PUBLIC_URL?.trim() || "http://127.0.0.1:3000").replace(/\/$/, "");
 }
 
 export function saveDiscordWebhookUrl(url: string | null) {
@@ -144,5 +163,7 @@ export function systemStatus(): SystemStatus {
     liveWritesAuthorized: writeMode === "live" && persistentStorage && hasLocalWriteGrant,
     liveWritesBlocker,
     discordConnected: Boolean(discordWebhookUrl()),
+    discordAlerts: discordAlerts(),
+    publicUrl: publicAppUrl(),
   };
 }

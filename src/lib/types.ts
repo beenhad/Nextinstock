@@ -136,7 +136,12 @@ export interface SystemStatus {
   liveWritesAuthorized: boolean;
   liveWritesBlocker: string | null;
   discordConnected: boolean;
+  discordAlerts: DiscordAlerts;
+  publicUrl: string;
 }
+
+/** Which Discord messages to send. */
+export type DiscordAlerts = { sales: boolean; restocks: boolean; needsYou: boolean };
 
 export interface EbayProfile {
   userId: string;

@@ -5096,3 +5096,20 @@ html[data-vt="data"]::view-transition-old(root), html[data-vt="data"]::view-tran
 .rl-drop-grid[data-count="1"] img { aspect-ratio: auto; height: 100%; max-height: 260px; }
 .tool-toast { position: fixed; top: 18px; right: 50%; bottom: auto; transform: translateX(50%); z-index: 60; }
 @keyframes toolToastIn { from { opacity: 0; translate: 0 -8px; } }
+
+/* Settings · Discord */
+.settings-discord { display: grid; gap: 14px; margin-top: 16px; padding: 20px; border: 1px solid var(--nis-line); border-radius: 16px; background: #fff; }
+.settings-discord header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.settings-discord header > span:first-child { display: grid; gap: 2px; }
+.settings-discord header small, .settings-alerts small, .settings-discord-hint { color: var(--nis-muted); }
+.settings-discord-steps { margin: 0; padding-left: 20px; color: var(--nis-muted); }
+.settings-discord-steps li { margin: 4px 0; }
+.settings-alerts { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+.settings-alerts:disabled { opacity: .5; }
+.settings-alerts legend { margin-bottom: 6px; font-weight: 600; }
+.settings-alerts label { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--nis-soft-line, #eceef2); border-radius: 12px; cursor: pointer; }
+.settings-alerts input { width: 18px; height: 18px; margin-top: 2px; accent-color: #3665f3; }
+.settings-alerts label > span { display: grid; gap: 1px; }
+.settings-discord-hint { margin: 0; font-size: 13px; line-height: 1.5; }
+.settings-discord-hint code { font-size: 12px; background: #f3f4f7; padding: 1px 5px; border-radius: 6px; }
+.settings-discord-actions .is-quiet { color: #e53238; }

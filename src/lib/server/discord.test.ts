@@ -81,7 +81,7 @@ test("preview shows every alert state without changing eBay", () => {
   const connection = buildTestDiscordPayload(at);
   assert.deepEqual(demo.embeds?.map((embed) => embed.title), [
     "🟢 NEW SALE", "🟢 AWAITING RESTOCK", "🔵 RESTOCKING", "🟢 RESTOCKED",
-    "🟢 RESTOCKED", "🟠 RESTOCK ON HOLD", "🔵 RESTOCK READY · DRY RUN", "🔴 RESTOCK NEEDS ATTENTION", "🟠 RESTOCK NEEDS REVIEW",
+    "🟢 RESTOCKED", "🟡 SOLD · WAITING FOR YOUR OK", "🟠 RESTOCK ON HOLD", "🔵 RESTOCK READY · DRY RUN", "🔴 RESTOCK NEEDS ATTENTION", "🟠 RESTOCK NEEDS REVIEW",
   ]);
   assert.match(demo.embeds?.[0].footer?.text ?? "", /PREVIEW.*No eBay change/);
   assert.equal(demo.embeds?.[0].thumbnail?.url, listing.imageUrls[0]);
@@ -89,7 +89,8 @@ test("preview shows every alert state without changing eBay", () => {
   assert.equal(demo.embeds?.[0].fields?.[0].value, "1 → 2");
   assert.equal(demo.embeds?.[0].fields?.[1].value, "1 → 0");
   assert.match(demo.embeds?.[0].fields?.[2].value ?? "", /Awaiting restock/);
-  assert.match(demo.embeds?.[5].fields?.[2].value ?? "", /No next copy queued/);
+  assert.match(demo.embeds?.[5].fields?.[2].value ?? "", /Approve the restock\]\(http:\/\/127\.0\.0\.1:3000\/tool\?approve=/);
+  assert.match(demo.embeds?.[6].fields?.[2].value ?? "", /No next copy queued/);
   assert.match(demo.embeds?.[4].fields?.[2].value ?? "", /No other copies are queued/);
   assert.ok(demo.embeds?.every((embed) => embed.footer?.text.includes("Simulated · No eBay change")));
   assert.ok((demo.embeds?.[0].description ?? "").length < 110);

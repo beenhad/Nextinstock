@@ -24,6 +24,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type {
   ActivityEvent,
+  DiscordAlerts,
   EbayProfile,
   ListingSnapshot,
   QueuedCopy,
@@ -715,10 +716,29 @@ function ActivityView({ events }: { events: ActivityEvent[] }) {
   );
 }
 
+const ALERT_OPTIONS: Array<{ key: keyof DiscordAlerts; label: string; detail: string }> = [
+  { key: "sales", label: "Sales", detail: "Something sold and the next copy is lined up." },
+  { key: "restocks", label: "Restocks", detail: "The next copy went up on eBay." },
+  { key: "needsYou", label: "Needs you", detail: "Waiting for your OK, out of copies, or something failed." },
+];
+
 function SettingsView({ status, onSaved }: { status: SystemStatus | null; onSaved: () => Promise<void> }) {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+
+  async function saveAlerts(alerts: Partial<DiscordAlerts>) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/integrations/discord", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "alerts", alerts }) });
+      if (!response.ok) throw new Error("Could not save alert settings.");
+      await onSaved();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not save alert settings.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function discordAction(action: "connect" | "disconnect" | "test" | "preview") {
     setBusy(true);
@@ -732,7 +752,7 @@ function SettingsView({ status, onSaved }: { status: SystemStatus | null; onSave
       const payload = await response.json() as { error?: string; warning?: string };
       if (!response.ok) throw new Error(payload.error ?? "Discord setup failed.");
       if (action === "connect") setWebhookUrl("");
-      setNotice(payload.warning ?? { connect: "Webhook and avatar saved.", disconnect: "Discord alerts disconnected.", test: "Connection test sent to Discord.", preview: "All nine alert previews sent with a real store listing." }[action]);
+      setNotice(payload.warning ?? { connect: "Webhook and avatar saved.", disconnect: "Discord alerts disconnected.", test: "Connection test sent to Discord.", preview: "Every alert type sent as a preview, using one of your listings." }[action]);
       if (action === "connect" || action === "disconnect") await onSaved();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Discord setup failed.");
@@ -777,29 +797,38 @@ function SettingsView({ status, onSaved }: { status: SystemStatus | null; onSave
           <span className="settings-on">{status?.persistentStorage ? "Saved" : "Temporary"}</span>
         </div>
       </div>
-      <details className="settings-optional">
-        <summary><span><strong>Discord alerts</strong><small>Optional · Get a message for every sale and restock</small></span><span className={`settings-on ${status?.discordConnected ? "" : "is-off"}`}>{status?.discordConnected ? "Connected" : "Off"}</span></summary>
-        <div className="settings-optional-body">
-          <p>Next posts to a Discord channel when something sells, when a restock goes up, and when something needs you. Each message shows the item photo and what changed. No bot or developer account needed.</p>
-          <ol>
-            <li>Use an existing channel or <a href="https://discord.new/GavFccHpQgcW" target="_blank" rel="noreferrer">copy the optional server template</a>.</li>
-            <li>In Discord, open Server Settings → Integrations → Webhooks and create a webhook for that channel.</li>
-            <li>Paste its URL below. It stays in this Mac&apos;s local data folder.</li>
-          </ol>
-          <label htmlFor="discord-webhook-url">Discord webhook URL</label>
-          <div className="settings-discord-input">
-            <input id="discord-webhook-url" type="password" autoComplete="off" spellCheck={false} value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder={status?.discordConnected ? "Connected · paste a new URL to replace" : "https://discord.com/api/webhooks/…"} />
-            <button type="button" disabled={busy || !webhookUrl.trim()} onClick={() => void discordAction("connect")}>{status?.discordConnected ? "Replace" : "Connect"}</button>
-          </div>
-          {status?.discordConnected && <div className="settings-discord-actions">
-            <button type="button" disabled={busy} onClick={() => void discordAction("test")}>Send test message</button>
-            <button type="button" disabled={busy} onClick={() => void discordAction("preview")}>Preview all alerts</button>
-            <button type="button" disabled={busy} onClick={() => void discordAction("disconnect")}>Disconnect</button>
-          </div>}
-          <small>Preview shows all nine alert states using a current title and photo from your connected eBay store. Every card is labeled simulated; eBay inventory is untouched. Real alerts come from worker checks.</small>
-          {notice && <p className="settings-discord-notice" role="status">{notice}</p>}
+      <section className="settings-discord" aria-labelledby="discord-heading">
+        <header>
+          <span><strong id="discord-heading">Discord</strong><small>Get a message when something sells, restocks, or needs your OK.</small></span>
+          <span className={`settings-on ${status?.discordConnected ? "" : "is-off"}`}>{status?.discordConnected ? "Connected" : "Not set up"}</span>
+        </header>
+        {!status?.discordConnected && <ol className="settings-discord-steps">
+          <li>In Discord, open Server Settings → Integrations → Webhooks and make a webhook for a channel. <a href="https://discord.new/GavFccHpQgcW" target="_blank" rel="noreferrer">Server template</a> if you want a fresh one.</li>
+          <li>Copy its URL and paste it here. It stays on this computer.</li>
+        </ol>}
+        <div className="settings-discord-input">
+          <input id="discord-webhook-url" aria-label="Discord webhook URL" type="password" autoComplete="off" spellCheck={false} value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder={status?.discordConnected ? "Connected · paste a new URL to replace it" : "https://discord.com/api/webhooks/…"} />
+          <button type="button" disabled={busy || !webhookUrl.trim()} onClick={() => void discordAction("connect")}>{status?.discordConnected ? "Replace" : "Connect"}</button>
         </div>
-      </details>
+        <fieldset className="settings-alerts" disabled={!status?.discordConnected || busy}>
+          <legend>Send me</legend>
+          {ALERT_OPTIONS.map((option) => (
+            <label key={option.key}>
+              <input type="checkbox" checked={status?.discordAlerts?.[option.key] ?? true} onChange={(event) => void saveAlerts({ [option.key]: event.target.checked })} />
+              <span><strong>{option.label}</strong><small>{option.detail}</small></span>
+            </label>
+          ))}
+        </fieldset>
+        <p className="settings-discord-hint">
+          Copies set to <b>When I say so</b> wait after a sale. The Discord message has a link that opens this listing so you can put the next one up. It points to <code>{status?.publicUrl ?? "http://127.0.0.1:3000"}</code>, so it only opens on this computer unless you set <code>NEXTINSTOCK_PUBLIC_URL</code>.
+        </p>
+        {status?.discordConnected && <div className="settings-discord-actions">
+          <button type="button" disabled={busy} onClick={() => void discordAction("test")}>Send a test</button>
+          <button type="button" disabled={busy} onClick={() => void discordAction("preview")}>Preview every alert</button>
+          <button type="button" className="is-quiet" disabled={busy} onClick={() => void discordAction("disconnect")}>Disconnect</button>
+        </div>}
+        {notice && <p className="settings-discord-notice" role="status">{notice}</p>}
+      </section>
     </>
   );
 }
