@@ -5,6 +5,7 @@ import "@fontsource/instrument-sans/500.css";
 import "@fontsource/instrument-sans/600.css";
 import "@fontsource/instrument-sans/700.css";
 import "./globals.css";
+import { FaviconCycle } from "@/components/favicon-cycle";
 
 export const metadata: Metadata = {
   title: "Next in stock: restock the same eBay listing after it sells",
@@ -15,7 +16,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body><FaviconCycle />{children}</body>
     </html>
   );
 }
