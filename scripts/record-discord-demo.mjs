@@ -16,7 +16,6 @@ const scratch = await mkdtemp(join(tmpdir(), "nextinstock-discord-"));
 const { stdout } = await run("npx", ["tsx", join(root, "scripts/discord-demo-payloads.ts")], { cwd: root });
 const embeds = JSON.parse(stdout.trim().split("\n").pop());
 
-const avatar = pathToFileURL(join(root, "assets/nextinstock-webhook-avatar.png")).href;
 const thumb = pathToFileURL(join(root, "public/demos/pokemon-xd-current.webp")).href;
 const esc = (text) => String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const rich = (text) => esc(text)
@@ -26,7 +25,7 @@ const hex = (n) => `#${n.toString(16).padStart(6, "0")}`;
 const time = "Today at 7:26 PM";
 
 const message = (embed, index) => `<div class="msg" style="animation-delay:${0.25 + index * 1.45}s">
-  <img class="av" src="${avatar}">
+  <div class="av"><span style="color:#3665f3">n</span><span style="color:#e53238">e</span><span style="color:#f5af02">x</span><span style="color:#86b817">t</span></div>
   <div class="body">
     <div class="head"><b>Next</b><span class="app">APP</span><span class="time">${time}</span></div>
     <div class="embed" style="border-color:${hex(embed.color)}">
@@ -51,7 +50,7 @@ const html = `<html><head><style>
   .msg { display: flex; gap: 14px; opacity: 0; transform: translateY(10px); }
   .go .msg { animation: in .35s cubic-bezier(.2,.8,.2,1) forwards; }
   @keyframes in { to { opacity: 1; transform: none; } }
-  .av { width: 40px; height: 40px; flex: none; border-radius: 50%; background: #fff; }
+  .av { display: grid; width: 40px; height: 40px; flex: none; place-content: center; grid-auto-flow: column; border-radius: 50%; background: #fff; font-family: Arial, sans-serif; font-size: 15px; font-weight: 700; letter-spacing: -1.2px; line-height: 1; padding-right: 1px; }
   .body { min-width: 0; flex: 1; }
   .head { display: flex; align-items: center; gap: 6px; }
   .head b { color: #f2f3f5; font-size: 15px; }
@@ -72,7 +71,7 @@ const html = `<html><head><style>
 </style></head><body><div class="channel"><i>#</i>restock-updates</div><div class="list">${embeds.map(message).join("")}</div></body></html>`;
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", args: ["--allow-file-access-from-files"] });
-const page = await browser.newPage({ viewport: { width: 640, height: 600 }, deviceScaleFactor: 2 });
+const page = await browser.newPage({ viewport: { width: 640, height: 600 }, deviceScaleFactor: 3 });
 const htmlFile = join(scratch, "discord.html");
 await writeFile(htmlFile, html);
 await page.goto(pathToFileURL(htmlFile).href);
@@ -81,7 +80,7 @@ await page.waitForTimeout(400);
 const frames = [];
 const cdp = await page.context().newCDPSession(page);
 cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => { frames.push({ data, t: metadata.timestamp }); void cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => undefined); });
-await cdp.send("Page.startScreencast", { format: "png", maxWidth: 1280, maxHeight: 1200, everyNthFrame: 1 });
+await cdp.send("Page.startScreencast", { format: "png", maxWidth: 1920, maxHeight: 1800, everyNthFrame: 1 });
 await page.waitForTimeout(150);
 const mark = Date.now() / 1000;
 await page.evaluate(() => document.body.classList.add("go"));
@@ -102,7 +101,7 @@ for (let i = 0; i < kept.length; i += 1) {
 list += `file '${join(scratch, `f${String(kept.length - 1).padStart(5, "0")}.png`)}'\n`;
 await writeFile(join(scratch, "list.txt"), list);
 const input = ["-f", "concat", "-safe", "0", "-i", join(scratch, "list.txt")];
-const vf = "fps=30,scale=1280:-2:flags=lanczos";
+const vf = "fps=30,scale=1920:-2:flags=lanczos";
 await run(ffmpegPath, ["-y", "-loglevel", "error", ...input, "-an", "-vf", vf, "-c:v", "libx264", "-preset", "slow", "-crf", "17", "-tune", "animation", "-pix_fmt", "yuv420p", "-movflags", "+faststart", join(output, "discord.mp4")]);
 await run(ffmpegPath, ["-y", "-loglevel", "error", "-sseof", "-0.1", "-i", join(output, "discord.mp4"), "-frames:v", "1", "-q:v", "3", join(output, "discord.jpg")]);
 await rm(scratch, { recursive: true, force: true });
