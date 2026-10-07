@@ -58,66 +58,53 @@ test("worker alerts use product thumbnail, status color, and event timestamp", (
     plan: { variationKey: "blue" } as WorkerResult["plan"],
     remainingQueuedCopies: 0,
   };
-  const payload = buildWorkerDiscordPayload(result, at);
-  assert.equal(payload?.username, "Next");
-  assert.equal(payload?.embeds?.[0].thumbnail?.url, listing.variations[0].imageUrls[0]);
-  assert.equal(payload?.embeds?.[0].color, 0x2ea66f);
-  assert.equal(payload?.embeds?.[0].timestamp, at.toISOString());
-  assert.equal(payload?.embeds?.[0].fields?.[0].value, "1");
-  assert.equal(payload?.embeds?.[0].fields?.[1].value, "1");
-  assert.equal(payload?.embeds?.[0].fields?.[0].name, "SOLD");
-  assert.equal(payload?.embeds?.[0].fields?.[1].name, "AVAILABLE");
-  assert.equal(payload?.embeds?.[0].fields?.[0].inline, false);
-  assert.equal(payload?.embeds?.[0].fields?.[1].inline, false);
-  assert.equal(payload?.embeds?.[0].fields?.[2].name, "NEXT ACTION");
-  assert.match(payload?.embeds?.[0].fields?.[2].value ?? "", /No other copies are queued/);
-  assert.match(payload?.embeds?.[0].description ?? "", /https:\/\/www\.ebay\.com\/itm\/123456789/);
+  const embed = buildWorkerDiscordPayload(result, at)?.embeds?.[0];
+  assert.equal(embed?.author?.name, "Restocked");
+  assert.equal(embed?.thumbnail?.url, listing.variations[0].imageUrls[0]);
+  assert.equal(embed?.color, 0x2ea66f);
+  assert.equal(embed?.timestamp, at.toISOString());
+  assert.equal(embed?.url, "https://www.ebay.com/itm/123456789");
+  assert.deepEqual(embed?.fields?.map((field) => [field.name, field.value, field.inline]), [["Sold", "1", true], ["Available", "1", true]]);
+  assert.match(embed?.description ?? "", /last copy lined up/);
   assert.equal(buildWorkerDiscordPayload({ ...result, action: "waiting_for_sale" }), null);
 });
 
-test("preview shows every alert state without changing eBay", () => {
+test("preview shows every alert state without emoji or eBay changes", () => {
   const at = new Date("2026-10-02T19:30:00.000Z");
   const demo = buildPreviewDiscordPayload(listing, at);
   const connection = buildTestDiscordPayload(at);
-  assert.deepEqual(demo.embeds?.map((embed) => embed.title), [
-    "🟢 NEW SALE", "🟢 AWAITING RESTOCK", "🔵 RESTOCKING", "🟢 RESTOCKED",
-    "🟢 RESTOCKED", "🟡 SOLD · WAITING FOR YOUR OK", "🟠 RESTOCK ON HOLD", "🔵 RESTOCK READY · DRY RUN", "🔴 RESTOCK NEEDS ATTENTION", "🟠 RESTOCK NEEDS REVIEW",
+  assert.deepEqual(demo.embeds?.map((embed) => embed.author?.name), [
+    "Sold", "Sold out · restock lined up", "Restocking", "Restocked", "Restocked",
+    "Sold · waiting for your OK", "Out of copies", "Restock ready · test mode", "Restock failed", "Needs review",
   ]);
-  assert.match(demo.embeds?.[0].footer?.text ?? "", /PREVIEW.*No eBay change/);
+  assert.ok(demo.embeds?.every((embed) => !/\p{Extended_Pictographic}/u.test(`${embed.author?.name} ${embed.title}`)));
+  assert.ok(demo.embeds?.every((embed) => embed.footer?.text.includes("Simulated, eBay not changed")));
   assert.equal(demo.embeds?.[0].thumbnail?.url, listing.imageUrls[0]);
-  assert.equal(demo.embeds?.[0].color, 0x2ea66f);
-  assert.equal(demo.embeds?.[0].fields?.[0].value, "1 → 2");
-  assert.equal(demo.embeds?.[0].fields?.[1].value, "1 → 0");
-  assert.match(demo.embeds?.[0].fields?.[2].value ?? "", /Awaiting restock/);
-  assert.match(demo.embeds?.[5].fields?.[2].value ?? "", /Approve the restock\]\(http:\/\/127\.0\.0\.1:3000\/tool\?approve=/);
-  assert.match(demo.embeds?.[6].fields?.[2].value ?? "", /No next copy queued/);
-  assert.match(demo.embeds?.[4].fields?.[2].value ?? "", /No other copies are queued/);
-  assert.ok(demo.embeds?.every((embed) => embed.footer?.text.includes("Simulated · No eBay change")));
-  assert.ok((demo.embeds?.[0].description ?? "").length < 110);
+  assert.deepEqual(demo.embeds?.[0].fields?.map((field) => field.value), ["1 → 2", "1 → 0", "5 photos"]);
+  assert.match(demo.embeds?.[0].description ?? "", /Next copy goes up <t:\d+:R>/);
+  assert.match(demo.embeds?.[5].description ?? "", /\[Put it up\]\(http:\/\/127\.0\.0\.1:3000\/tool\?approve=/);
+  assert.match(demo.embeds?.[6].description ?? "", /No copies left in line/);
+  assert.match(demo.embeds?.[4].description ?? "", /last copy lined up/);
   assert.equal(connection.embeds?.[0].timestamp, at.toISOString());
   assert.equal(connection.embeds?.[0].color, 0x3155f5);
 });
 
-test("scheduled sale alert gives a relative eligibility time and exact restock steps", () => {
+test("sale alert shows the change, when the next copy goes up, and what it is", () => {
   const scheduledFor = "2026-10-02T19:31:00.000Z";
   const plan = {
     variationKey: null,
-    copy: { id: "copy-1", internalReference: "GC-SONIC-POSTER-02", photoCount: 8, targetPrice: null },
+    copy: { id: "copy-1", internalReference: "GC-SONIC-POSTER-02", photoCount: 8, targetPrice: 86.99 },
     trigger: { armedQuantitySold: 2, currentQuantitySold: 2, currentQuantityAvailable: 0 },
   } as WorkerResult["plan"];
-  const payload = buildWorkerDiscordPayload({
+  const embed = buildWorkerDiscordPayload({
     taskId: "task-1", action: "restock_scheduled", message: "Sale observed", listing: { ...listing, quantitySold: 2, quantityAvailable: 0, variations: [] }, plan, scheduledFor,
     trigger: { kind: "new_sale", previousSold: 1, previousAvailable: 1 },
-  });
-  const embed = payload?.embeds?.[0];
-  assert.equal(embed?.title, "🟢 NEW SALE");
+  })?.embeds?.[0];
+  assert.equal(embed?.author?.name, "Sold");
   assert.equal(embed?.color, 0x2ea66f);
-  assert.deepEqual(embed?.fields?.map((field) => field.name), ["SOLD", "AVAILABLE", "NEXT ACTION"]);
-  assert.equal(embed?.fields?.[0].value, "1 → 2");
-  assert.equal(embed?.fields?.[1].value, "1 → 0");
-  assert.match(embed?.fields?.[2].value ?? "", new RegExp(`<t:${Date.parse(scheduledFor) / 1000}:R>`));
-  assert.match(embed?.fields?.[2].value ?? "", /GC-SONIC-POSTER-02 · 8 photos \+ condition → verify at 0 → publish 1/);
-  assert.match(embed?.footer?.text ?? "", /Trigger 2 sold \/ 0 available/);
+  assert.deepEqual(embed?.fields?.map((field) => [field.name, field.value]), [["Sold", "1 → 2"], ["Available", "1 → 0"], ["Next copy", "$86.99 · 8 photos"]]);
+  assert.equal(embed?.description, `Next copy goes up <t:${Date.parse(scheduledFor) / 1000}:R>.`);
+  assert.equal(embed?.footer?.text, "eBay 123456789");
 });
 
 test("preview uses a valid product thumbnail and keeps long titles compact", () => {
@@ -127,6 +114,5 @@ test("preview uses a valid product thumbnail and keeps long titles compact", () 
     imageUrls: ["https://example.com/not-a-product.jpg", listing.imageUrls[0]],
   });
   assert.equal(demo.embeds?.[0].thumbnail?.url, listing.imageUrls[0]);
-  assert.match(demo.embeds?.[0].title ?? "", /NEW SALE/);
-  assert.ok((demo.embeds?.[0].description ?? "").length < 125);
+  assert.ok((demo.embeds?.[0].title ?? "").length < 80);
 });
