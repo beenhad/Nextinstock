@@ -2,7 +2,6 @@ import { ArrowRight, BookOpen, Check, Scale, Star } from "lucide-react";
 import { FaGithub } from "react-icons/fa";
 import { BrandMark } from "@/components/brand-mark";
 import { CopyCommand } from "@/components/copy-command";
-import { HeroScreenshot } from "@/components/hero-demo";
 import { SiteHeader } from "@/components/site-header";
 import { RepeatStockShowcase } from "@/components/repeat-stock-showcase";
 import { REPO_URL } from "@/lib/site";
@@ -75,9 +74,9 @@ export default function HomePage() {
         <div className="site-container hero-grid">
           <div className="hero-copy">
             <span className="hero-kicker">Free and open source for eBay sellers</span>
-            <h1>One sold.<br />The next one&apos;s up.</h1>
+            <h1>Line up every copy. Never restock by hand again.</h1>
             <p className="hero-lede">
-              Photograph your next copies ahead of time. When the current one sells, Next swaps in the next copy&apos;s photos, condition, and price on the same listing. Same item number, same sold count.
+              Batch your copies onto one eBay listing, each with its own photos and price or a stack of the same. Every time one sells, Next puts the next one up on the same item number, at the pace you set.
             </p>
             <div className="hero-actions">
               <a className="primary-link hero-price-link" href={REPO_URL} target="_blank" rel="noreferrer">
@@ -88,7 +87,7 @@ export default function HomePage() {
             </div>
           </div>
           <div className="hero-visual-wrap">
-            <HeroScreenshot />
+            <img className="hero-shot" src="/demos/hero-release-line.webp" width={1984} height={772} alt="Next's release line: the copy on eBay now, followed by the copies lined up to sell next, each with its own price." />
           </div>
         </div>
       </section>
@@ -97,8 +96,8 @@ export default function HomePage() {
         <div className="site-container">
           <div className="section-intro">
             <span className="section-kicker">How it works</span>
-            <h2>Sold to live again, on the same item number.</h2>
-            <p>Set it up once per listing. After that, a sale is the only thing that has to happen.</p>
+            <h2>Set it up once. Every sale restocks itself.</h2>
+            <p>Set up each listing once. After that, Next does the restocking.</p>
           </div>
           <RepeatStockShowcase />
         </div>
