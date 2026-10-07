@@ -28,7 +28,7 @@ test("only one worker owns a task, and an expired lease can be recovered", async
   legacy.prepare("INSERT INTO copies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .run("legacy-copy", "legacy-task", "LEGACY", null, null, "Saved note", "queued", "2025-01-01", "2025-01-01");
   legacy.close();
-  const { acquireTaskLease, addQueuedCopy, completeHandoff, createTask, getOrCreateHandoffRun, getTask, moveQueuedCopy, pendingDiscordNotifications, queueDiscordNotification, recordDiscordDelivery, releaseTaskLease, removeQueuedCopy, renewTaskLease, reorderQueuedCopies, scheduleHandoffRun, setQueuedCopyPrices, updateQueuedCopyDetails, updateTaskSettings, updateQueuedCopyPrice, upsertListing } = await import("./database");
+  const { acquireTaskLease, addQueuedCopy, approveHandoffRun, updateHandoffRun, completeHandoff, createTask, getOrCreateHandoffRun, getTask, moveQueuedCopy, pendingDiscordNotifications, queueDiscordNotification, recordDiscordDelivery, releaseTaskLease, removeQueuedCopy, renewTaskLease, reorderQueuedCopies, scheduleHandoffRun, setQueuedCopyPrices, updateQueuedCopyDetails, updateTaskSettings, updateQueuedCopyPrice, upsertListing } = await import("./database");
   const snapshot: ListingSnapshot = {
     itemId: "123456789",
     sku: null,
@@ -149,4 +149,26 @@ test("only one worker owns a task, and an expired lease can be recovered", async
   assert.equal(pendingDiscordNotifications().length, 1);
   recordDiscordDelivery("sale:8", null);
   assert.equal(pendingDiscordNotifications().length, 0);
+  // A listing can start with an empty line, then copies carry their own timing.
+  const blank = createTask({ taskId: "blank-task", copyId: null, snapshot: { ...snapshot, itemId: "555000111" }, internalReference: "", conditionDescription: "", images: [] });
+  assert.equal(blank.queuedCopies.length, 0);
+  addQueuedCopy({ taskId: "blank-task", copyId: "blank-1", snapshot: { ...snapshot, itemId: "555000111" }, internalReference: "B-1", conditionDescription: "", targetPrice: 20, releaseDelaySeconds: 3600, needsApproval: true, images: [] });
+  const timed = getTask("blank-task")!.queuedCopies[0];
+  assert.equal(timed.releaseDelaySeconds, 3600);
+  assert.equal(timed.needsApproval, true);
+  const retimed = updateQueuedCopyDetails("blank-task", "blank-1", { releaseDelaySeconds: null, needsApproval: false }).queuedCopies[0];
+  assert.equal(retimed.releaseDelaySeconds, null);
+  assert.equal(retimed.needsApproval, false);
+  assert.equal(updateQueuedCopyDetails("blank-task", "blank-1", { grade: "great" }).queuedCopies[0].grade, "great");
+  assert.throws(() => updateQueuedCopyDetails("blank-task", "blank-1", { grade: "mint" }), /condition/);
+  // Approval releases only a run that is actually waiting.
+  const waitingRun = getOrCreateHandoffRun("blank-task", 9);
+  assert.equal(approveHandoffRun("blank-task"), false);
+  updateHandoffRun(waitingRun.id, { status: "awaiting_approval" });
+  assert.equal(approveHandoffRun("blank-task"), true);
+  const approved = getOrCreateHandoffRun("blank-task", 9);
+  assert.ok(approved.approvedAt);
+  assert.equal(approved.status, "created");
+  assert.equal(approveHandoffRun("blank-task"), false);
+
 });

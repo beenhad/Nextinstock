@@ -25,7 +25,8 @@ export async function POST(request: Request) {
     const targetPrice = parseTargetPrice(form.get("targetPrice"));
     const files = form.getAll("photos").filter((value): value is File => value instanceof File);
 
-    if (!internalReference) {
+    const startEmpty = form.get("startEmpty") === "true";
+    if (!startEmpty && !internalReference) {
       return NextResponse.json({ error: "Add an internal copy reference" }, { status: 400 });
     }
     const listing = await fetchListing(itemId);
@@ -40,6 +41,10 @@ export async function POST(request: Request) {
     }
     if (!listing.variations.length && variationKey) {
       return NextResponse.json({ error: "This listing has no variations" }, { status: 400 });
+    }
+    if (startEmpty) {
+      const task = createTask({ taskId: randomUUID(), copyId: null, snapshot: listing, variationKey, internalReference: "", conditionDescription: "", images: [] });
+      return NextResponse.json({ task }, { status: 201 });
     }
     if (!variationKey && files.length && !conditionDescription) {
       return NextResponse.json({ error: "Add the condition note for this copy" }, { status: 400 });

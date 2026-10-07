@@ -11,22 +11,18 @@ import {
   Clock3,
   ExternalLink,
   HardDrive,
-  Layers,
   LayoutList,
   LoaderCircle,
   BookOpen,
-  Plus,
   RefreshCw,
   Search,
   Settings,
   ShieldCheck,
-  Upload,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type {
-  PriceRule,
   ActivityEvent,
   EbayProfile,
   ListingSnapshot,
@@ -37,8 +33,9 @@ import type {
 } from "@/lib/types";
 import { BrandMark } from "./brand-mark";
 import { ToolSupport } from "./tool-support";
-import { DELAY_OPTIONS, LadderPreview, RestockBoard, RuleFields, type IdenticalCopies, type QueueAction, type TaskPatch } from "./restock-board";
-import { ladderPrices } from "@/lib/price-rule";
+import { ListingsHome } from "./listings-home";
+import { ReleaseLine } from "./release-line";
+import type { DistinctCopy, IdenticalCopies, QueueAction, TaskPatch } from "./tool-actions";
 
 type ToolView = "tasks" | "activity" | "settings" | "support";
 
@@ -92,13 +89,15 @@ function applyQueueAction(task: RestockTask, copyId: string, body: QueueAction):
       ...copies[index],
       ...(body.internalReference !== undefined ? { internalReference: body.internalReference.trim() } : {}),
       ...(body.conditionDescription !== undefined ? { conditionDescription: body.conditionDescription.trim() } : {}),
+      ...(body.releaseDelaySeconds !== undefined ? { releaseDelaySeconds: body.releaseDelaySeconds } : {}),
+      ...(body.needsApproval !== undefined ? { needsApproval: body.needsApproval, ...(body.needsApproval ? {} : {}) } : {}),
+      ...(body.grade !== undefined ? { grade: body.grade } : {}),
     };
   }
   const ordered = copies.map((copy, position) => ({ ...copy, queuePosition: position + 1 }));
   return { ...task, queuedCopies: ordered, queuedCopy: ordered[0] ?? null };
 }
 
-const builderSteps = ["Listing", "Copies", "Review"];
 
 function EbayBadge() {
   return (
@@ -143,21 +142,11 @@ function ListingImage({
   return <img className={`tool-real-photo ${className}`} src={src} alt={alt} />;
 }
 
-function LocalFilePreview({ file }: { file: File }) {
-  const [url, setUrl] = useState("");
-  useEffect(() => {
-    const nextUrl = URL.createObjectURL(file);
-    setUrl(nextUrl);
-    return () => URL.revokeObjectURL(nextUrl);
-  }, [file]);
-  return url ? <img src={url} alt={file.name} /> : <span />;
-}
-
 export function ToolPrototype() {
   const [view, setView] = useState<ToolView>("tasks");
   const [builderStep, setBuilderStep] = useState(0);
-  const [builderTask, setBuilderTask] = useState<RestockTask | null>(null);
   const [prefillItemId, setPrefillItemId] = useState("");
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<RestockTask[]>([]);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [status, setStatus] = useState<SystemStatus | null>(null);
@@ -188,6 +177,9 @@ export function ToolPrototype() {
     reload()
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load Nextinstock"))
       .finally(() => setLoading(false));
+    // The Discord "Approve" link opens the listing so the seller can confirm with one tap.
+    const approveId = new URLSearchParams(window.location.search).get("approve");
+    if (approveId) setOpenTaskId(approveId);
   }, [reload]);
 
   useEffect(() => {
@@ -287,55 +279,121 @@ export function ToolPrototype() {
     }
   }
 
-  async function addIdentical(taskId: string, copies: IdenticalCopies): Promise<boolean> {
+  async function addIdentical(taskId: string, copies: IdenticalCopies): Promise<RestockTask | null> {
     setError("");
+    const current = tasksRef.current.find((task) => task.id === taskId);
+    if (!current) return null;
+    // Show the new copies immediately; the server's answer replaces these placeholders.
+    const stamp = Date.now();
+    const placeholders: QueuedCopy[] = Array.from({ length: copies.count }, (_, index) => ({
+      id: `pending-${stamp}-${index}`, taskId, queuePosition: 0, internalReference: `${copies.reference}…`,
+      targetPrice: copies.prices[index] ?? null, conditionId: null, conditionName: null, conditionDescription: "",
+      releaseDelaySeconds: copies.releaseDelaySeconds ?? null, needsApproval: Boolean(copies.needsApproval), grade: null,
+      status: "queued", photos: [], createdAt: new Date().toISOString(),
+    }));
+    const anchorIndex = copies.afterCopyId ? current.queuedCopies.findIndex((copy) => copy.id === copies.afterCopyId) : -1;
+    const at = anchorIndex >= 0 ? anchorIndex + 1 : current.queuedCopies.length;
+    const optimistic = [...current.queuedCopies.slice(0, at), ...placeholders, ...current.queuedCopies.slice(at)];
+    setTasks((list) => list.map((task) => task.id === taskId ? { ...task, queuedCopies: optimistic, queuedCopy: optimistic[0] ?? null } : task));
+    const sequence = (queueSequence.current.get(taskId) ?? 0) + 1;
+    queueSequence.current.set(taskId, sequence);
     try {
       const form = new FormData();
       form.set("internalReference", copies.reference);
       form.set("count", String(copies.count));
+      form.set("startIndex", String(current.queuedCopies.filter((copy) => copy.photos.length === 0).length + 1));
       form.set("prices", JSON.stringify(copies.prices.map((price) => price === null ? null : price.toFixed(2))));
+      if (copies.releaseDelaySeconds !== undefined && copies.releaseDelaySeconds !== null) form.set("releaseDelaySeconds", String(copies.releaseDelaySeconds));
+      if (copies.needsApproval) form.set("needsApproval", "true");
       const response = await fetch(`/api/tasks/${taskId}/copies`, { method: "POST", body: form });
       const payload = await response.json() as { task?: RestockTask; error?: string };
       if (!response.ok || !payload.task) throw new Error(payload.error || "Could not add copies");
-      withTransition(() => setTasks((list) => list.map((task) => task.id === taskId ? payload.task! : task)));
-      showToast(`Added ${copies.count} ${copies.count === 1 ? "copy" : "copies"}`);
-      return true;
+      let task = payload.task;
+      if (at < current.queuedCopies.length) {
+        const known = new Set(current.queuedCopies.map((copy) => copy.id));
+        const added = task.queuedCopies.filter((copy) => !known.has(copy.id)).map((copy) => copy.id);
+        const rest = task.queuedCopies.map((copy) => copy.id).filter((id) => !added.includes(id));
+        const order = [...rest.slice(0, at), ...added, ...rest.slice(at)];
+        const reordered = await fetch(`/api/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order }) });
+        const reorderPayload = await reordered.json() as { task?: RestockTask };
+        if (reordered.ok && reorderPayload.task) task = reorderPayload.task;
+      }
+      if (queueSequence.current.get(taskId) === sequence) setTasks((list) => list.map((entry) => entry.id === taskId ? task : entry));
+      return task;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not add copies");
+      await reload().catch(() => undefined);
+      return null;
+    }
+  }
+
+  async function addDistinct(taskId: string, copy: DistinctCopy): Promise<RestockTask | null> {
+    setError("");
+    try {
+      const form = new FormData();
+      form.set("internalReference", copy.reference);
+      form.set("conditionDescription", copy.note);
+      form.set("targetPrice", copy.price.trim());
+      if (copy.grade) form.set("grade", copy.grade);
+      copy.files.forEach((file) => form.append("photos", file));
+      const response = await fetch(`/api/tasks/${taskId}/copies`, { method: "POST", body: form });
+      const payload = await response.json() as { task?: RestockTask; error?: string };
+      if (!response.ok || !payload.task) throw new Error(payload.error || "Could not add the copy");
+      withTransition(() => setTasks((list) => list.map((task) => task.id === taskId ? payload.task! : task)));
+      showToast("Added to the line");
+      return payload.task;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not add the copy");
+      return null;
+    }
+  }
+
+  async function approve(taskId: string): Promise<boolean> {
+    setError("");
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/approve`, { method: "POST" });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Could not approve");
+      await reload();
+      showToast("Approved. The next one is going up.");
+      if (window.location.search.includes("approve=")) window.history.replaceState(null, "", "/tool");
+      return true;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not approve");
       return false;
     }
+  }
+
+  function openTask(taskId: string | null) {
+    withTransition(() => { setOpenTaskId(taskId); setError(""); });
   }
 
   function openView(nextView: ToolView) {
     withTransition(() => {
       setView(nextView);
       setBuilderStep(0);
-      setBuilderTask(null);
+      
+      setOpenTaskId(null);
       setError("");
     });
     if (nextView === "activity" || nextView === "tasks") void reload().catch(() => undefined);
   }
 
   function openBuilder(task: RestockTask | null, step: number, itemId = "") {
-    withTransition(() => { setPrefillItemId(itemId); setBuilderTask(task); setBuilderStep(step); });
+    withTransition(() => { setPrefillItemId(itemId); setBuilderStep(step); });
   }
 
   async function taskCreated(task: RestockTask) {
-    const queuedAnotherCopy = Boolean(builderTask);
     await reload().catch(() => undefined);
     withTransition(() => {
       setBuilderStep(0);
-      setBuilderTask(null);
+      
       setView("tasks");
+      setOpenTaskId(task.id);
     });
-    showToast(
-      queuedAnotherCopy
-        ? "Next physical copy queued"
-        : task.listing.quantityAvailable === 0
-        ? "Task activated · listing remains safely at zero"
-        : "Restock task activated",
-    );
   }
+
+  const openTaskData = openTaskId ? tasks.find((task) => task.id === openTaskId) ?? null : null;
 
   return (
     <div className="tool-shell">
@@ -381,28 +439,29 @@ export function ToolPrototype() {
           {error && <div className="tool-error-banner"><AlertTriangle size={17} /> {error}</div>}
           {builderStep > 0 ? (
             <TaskBuilder
-              step={builderStep}
+              key={prefillItemId || "new"}
               status={status}
-              existingTask={builderTask}
               prefillItemId={prefillItemId}
-              onStep={(nextStep) => withTransition(() => setBuilderStep(nextStep))}
               onClose={() => openBuilder(null, 0)}
               onCreated={taskCreated}
             />
-          ) : view === "tasks" ? (
-            <TasksView
-              tasks={tasks}
-              events={events}
-              loading={loading}
-              busyTaskId={busyTaskId}
-              onNew={() => openBuilder(null, 1)}
-              onQueue={(task) => openBuilder(task, 2)}
-              onTrackOption={(task) => openBuilder(null, 1, task.itemId)}
-              onCheck={checkTask}
-              onQueueAction={updateQueue}
-              onTaskPatch={patchTask}
-              onAddIdentical={addIdentical}
+          ) : view === "tasks" && openTaskData ? (
+            <ReleaseLine
+              key={openTaskData.id}
+              task={openTaskData}
+              busy={busyTaskId === openTaskData.id}
+              actions={{
+                onBack: () => openTask(null),
+                onCheck: () => void checkTask(openTaskData.id),
+                onApprove: () => approve(openTaskData.id),
+                onQueueAction: (copyId, body) => updateQueue(openTaskData.id, copyId, body),
+                onPatch: (patch) => patchTask(openTaskData.id, patch),
+                onAddIdentical: (copies) => addIdentical(openTaskData.id, copies),
+                onAddDistinct: (copy) => addDistinct(openTaskData.id, copy),
+              }}
             />
+          ) : view === "tasks" ? (
+            <ListingsHome tasks={tasks} events={events} loading={loading} onOpen={(task) => openTask(task.id)} onNew={() => openBuilder(null, 1)} />
           ) : view === "activity" ? (
             <ActivityView events={events} />
           ) : view === "support" ? (
@@ -418,135 +477,20 @@ export function ToolPrototype() {
   );
 }
 
-function TasksView({
-  tasks,
-  events,
-  loading,
-  busyTaskId,
-  onNew,
-  onQueue,
-  onTrackOption,
-  onCheck,
-  onQueueAction,
-  onTaskPatch,
-  onAddIdentical,
-}: {
-  tasks: RestockTask[];
-  events: ActivityEvent[];
-  loading: boolean;
-  busyTaskId: string | null;
-  onNew: () => void;
-  onQueue: (task: RestockTask) => void;
-  onTrackOption: (task: RestockTask) => void;
-  onCheck: (taskId: string) => void;
-  onQueueAction: (taskId: string, copyId: string, body: QueueAction) => Promise<boolean>;
-  onTaskPatch: (taskId: string, patch: TaskPatch) => Promise<boolean>;
-  onAddIdentical: (taskId: string, copies: IdenticalCopies) => Promise<boolean>;
-}) {
-  const [filter, setFilter] = useState<"all" | "attention">("all");
-  const [search, setSearch] = useState("");
-  const queued = tasks.reduce((count, task) => count + task.queuedCopies.length, 0);
-  const needsLook = (task: RestockTask) => ["attention", "error"].includes(task.status) || task.queuedCopies.length === 0;
-  const attention = tasks.filter(needsLook).length;
-  const visibleTasks = tasks.filter((task) => {
-    if (filter === "attention" && !needsLook(task)) return false;
-    const query = search.trim().toLowerCase();
-    return !query || [task.itemId, task.listing.title, task.listing.variations.find((variation) => variation.key === task.variationKey)?.label, ...task.queuedCopies.map((copy) => copy.internalReference)]
-      .some((value) => value?.toLowerCase().includes(query));
-  });
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
-  const restocked = events.filter(
-    (event) => ["restock_completed", "variation_restock_confirmed"].includes(event.type) && new Date(event.createdAt) >= monthStart,
-  ).length;
-
-  return (
-    <>
-      <div className="tool-page-heading">
-        <div>
-          <h1>Your listings</h1>
-          <p>Line up what sells next. Drag to reorder, click a price to change it.</p>
-        </div>
-        <button className="tool-primary-button" type="button" onClick={onNew}>
-          <Plus size={16} /> Add a listing
-        </button>
-      </div>
-
-      <div className="tool-stat-row">
-        <article><span>Listings watched</span><strong>{tasks.length}</strong></article>
-        <article><span>Copies queued</span><strong>{queued}</strong></article>
-        <article><span>Restocked this month</span><strong>{restocked}</strong></article>
-        <article className={attention ? "is-warning" : ""}><span>Need a look</span><strong>{attention}</strong></article>
-      </div>
-
-      <div className="tool-table-toolbar rb-toolbar">
-        <div className="tool-table-tabs">
-          <button className={filter === "all" ? "active" : ""} type="button" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All <span>{tasks.length}</span></button>
-          <button className={filter === "attention" ? "active" : ""} type="button" aria-pressed={filter === "attention"} onClick={() => setFilter("attention")}>Need a look <span>{attention}</span></button>
-        </div>
-        <label className="tool-table-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search listings or labels" aria-label="Search listings" /></label>
-      </div>
-
-      {loading ? (
-        <div className="tool-empty-state"><LoaderCircle className="spin" size={22} /> Loading</div>
-      ) : tasks.length === 0 ? (
-        <div className="tool-empty-state">
-          <ShieldCheck size={26} />
-          <strong>No listings yet</strong>
-          <span>Pick a listing you sell more than one of, then line up the copies that come next.</span>
-          <button className="tool-primary-button" type="button" onClick={onNew}>Add your first listing</button>
-        </div>
-      ) : visibleTasks.length === 0 ? (
-        <div className="tool-empty-state"><Search size={24} /><strong>Nothing matches</strong><span>Try a different search or filter.</span></div>
-      ) : (
-        <RestockBoard
-          tasks={visibleTasks}
-          busyTaskId={busyTaskId}
-          onCheck={onCheck}
-          onQueueAction={onQueueAction}
-          onTaskPatch={onTaskPatch}
-          onAddIdentical={onAddIdentical}
-          onAddDistinct={onQueue}
-          onTrackOption={onTrackOption}
-        />
-      )}
-    </>
-  );
-}
-
 function TaskBuilder({
-  step,
   status,
-  existingTask,
   prefillItemId = "",
-  onStep,
   onClose,
   onCreated,
 }: {
-  step: number;
   status: SystemStatus | null;
-  existingTask: RestockTask | null;
   prefillItemId?: string;
-  onStep: (step: number) => void;
   onClose: () => void;
   onCreated: (task: RestockTask) => Promise<void>;
 }) {
-  const [itemId, setItemId] = useState(
-    existingTask?.itemId ?? (prefillItemId || status?.defaultItemId || ""),
-  );
-  const [listing, setListing] = useState<ListingSnapshot | null>(existingTask?.listing ?? null);
-  const [variationKey, setVariationKey] = useState<string | null>(existingTask?.variationKey ?? null);
-  const [internalReference, setInternalReference] = useState("");
-  const [conditionDescription, setConditionDescription] = useState(
-    existingTask?.listing.conditionDescription ?? "",
-  );
-  const [targetPrice, setTargetPrice] = useState(() => String(existingTask?.queuedCopies.at(-1)?.targetPrice ?? ""));
-  const [files, setFiles] = useState<File[]>([]);
-  const [mode, setMode] = useState<"distinct" | "identical">(existingTask?.variationKey ? "identical" : "distinct");
-  const [identicalCount, setIdenticalCount] = useState(3);
-  const [rule, setRule] = useState<PriceRule>({ mode: "amount", step: 0, cap: null });
-  const [delay, setDelay] = useState<number | null>(null);
+  const [itemId, setItemId] = useState(prefillItemId || status?.defaultItemId || "");
+  const [listing, setListing] = useState<ListingSnapshot | null>(null);
+  const [variationKey, setVariationKey] = useState<string | null>(null);
   const [loadingListing, setLoadingListing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [builderError, setBuilderError] = useState("");
@@ -555,111 +499,44 @@ function TaskBuilder({
     setLoadingListing(true);
     setBuilderError("");
     try {
-      const response = await fetch(`/api/ebay/listings?itemId=${encodeURIComponent(itemId)}`, {
-        cache: "no-store",
-      });
+      const response = await fetch(`/api/ebay/listings?itemId=${encodeURIComponent(itemId)}`, { cache: "no-store" });
       const payload = (await response.json()) as { listing?: ListingSnapshot; error?: string };
-      if (!response.ok || !payload.listing) throw new Error(payload.error || "Listing sync failed");
+      if (!response.ok || !payload.listing) throw new Error(payload.error || "Couldn't find that listing");
       setListing(payload.listing);
       setVariationKey(null);
-      setMode(payload.listing.variations.length ? "identical" : "distinct");
-      setConditionDescription(
-        payload.listing.conditionDescription || "",
-      );
-      setTargetPrice("");
     } catch (caught) {
-      setBuilderError(caught instanceof Error ? caught.message : "Listing sync failed");
+      setBuilderError(caught instanceof Error ? caught.message : "Couldn't find that listing");
     } finally {
       setLoadingListing(false);
     }
   }, [itemId]);
 
   useEffect(() => {
-    if (!existingTask && itemId) void syncListing();
-  }, []); // The selected listing is intentionally synced once when setup opens.
+    if (itemId) void syncListing();
+  }, []); // Look the prefilled listing up once when this opens.
 
-  const isVariation = Boolean(variationKey);
-  const effectiveMode = isVariation ? "identical" : mode;
-  const selectedVariation = listing?.variations.find((variation) => variation.key === variationKey);
-  const basePrice = selectedVariation?.price ?? listing?.price ?? null;
-  const identicalPrices = effectiveMode === "identical" && rule.step !== 0 && basePrice !== null
-    ? ladderPrices(basePrice, rule, identicalCount)
-    : Array.from({ length: effectiveMode === "identical" ? identicalCount : 0 }, () => null as number | null);
-
-  function next() {
+  async function start() {
     setBuilderError("");
-    if (step === 1 && (!listing || !listing.supported)) {
+    if (!listing || !listing.supported) {
       setBuilderError(listing?.unsupportedReasons.join(". ") || "Look up a listing first");
       return;
     }
-    if (step === 1 && listing?.variations.length && !variationKey) {
-      setBuilderError("Choose which option to restock");
+    if (listing.variations.length && !variationKey) {
+      setBuilderError("Choose which option this is for");
       return;
     }
-    if (step === 2) {
-      if (!internalReference.trim()) return setBuilderError("Give this copy a label so you can tell copies apart");
-      if (effectiveMode === "distinct") {
-        if (files.length === 0) return setBuilderError("Add photos of this exact copy");
-        if (!conditionDescription.trim()) return setBuilderError("Describe this copy's condition");
-        if (targetPrice.trim() && (!/^\d{1,6}(?:\.\d{1,2})?$/.test(targetPrice.trim()) || Number(targetPrice) < 0.01)) {
-          return setBuilderError("Enter a price like 24.99");
-        }
-      } else if (!listing?.imageUrls.length && !isVariation) {
-        return setBuilderError("This listing has no photos to reuse. Add copies with their own photos instead.");
-      }
-    }
-    onStep(Math.min(3, step + 1));
-  }
-
-  async function activate() {
-    if (!listing) return;
     setSubmitting(true);
-    setBuilderError("");
     try {
-      const identical = effectiveMode === "identical";
-      const label = internalReference.trim();
       const form = new FormData();
       form.set("itemId", listing.itemId);
+      form.set("startEmpty", "true");
       if (variationKey) form.set("variationKey", variationKey);
-      if (identical) {
-        form.set("internalReference", identicalCount > 1 ? `${label}-1` : label);
-        form.set("conditionDescription", "");
-        form.set("targetPrice", identicalPrices[0] === null ? "" : identicalPrices[0].toFixed(2));
-        if (existingTask) { form.set("count", String(identicalCount)); form.set("prices", JSON.stringify(identicalPrices.map((price) => price === null ? null : price.toFixed(2)))); form.set("internalReference", label); }
-      } else {
-        form.set("internalReference", label);
-        form.set("conditionDescription", conditionDescription);
-        form.set("targetPrice", targetPrice.trim());
-        files.forEach((file) => form.append("photos", file));
-      }
-      const endpoint = existingTask ? `/api/tasks/${existingTask.id}/copies` : "/api/tasks";
-      const response = await fetch(endpoint, { method: "POST", body: form });
+      const response = await fetch("/api/tasks", { method: "POST", body: form });
       const payload = (await response.json()) as { task?: RestockTask; error?: string };
-      if (!response.ok || !payload.task) throw new Error(payload.error || "Could not save");
-      let task = payload.task;
-      if (!existingTask && identical && identicalCount > 1) {
-        const rest = new FormData();
-        rest.set("internalReference", label);
-        rest.set("count", String(identicalCount - 1));
-        rest.set("startIndex", "2");
-        rest.set("prices", JSON.stringify(identicalPrices.slice(1).map((price) => price === null ? null : price.toFixed(2))));
-        const more = await fetch(`/api/tasks/${task.id}/copies`, { method: "POST", body: rest });
-        const morePayload = (await more.json()) as { task?: RestockTask; error?: string };
-        if (!more.ok || !morePayload.task) throw new Error(morePayload.error || "Saved the first copy, but not the rest");
-        task = morePayload.task;
-      }
-      if (!existingTask && (delay !== null || (identical && rule.step !== 0))) {
-        const settings = await fetch(`/api/tasks/${task.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ restockDelaySeconds: delay, ...(identical && rule.step !== 0 ? { priceRule: rule } : {}) }),
-        });
-        const settingsPayload = (await settings.json()) as { task?: RestockTask };
-        if (settings.ok && settingsPayload.task) task = settingsPayload.task;
-      }
-      await onCreated(task);
+      if (!response.ok || !payload.task) throw new Error(payload.error || "Couldn't add the listing");
+      await onCreated(payload.task);
     } catch (caught) {
-      setBuilderError(caught instanceof Error ? caught.message : "Could not save");
+      setBuilderError(caught instanceof Error ? caught.message : "Couldn't add the listing");
     } finally {
       setSubmitting(false);
     }
@@ -669,123 +546,28 @@ function TaskBuilder({
     <div className="builder-shell">
       <div className="builder-heading">
         <div>
-          <button type="button" onClick={onClose}><ArrowLeft size={16} /> Your listings</button>
-          <h1>{existingTask ? "Add a copy" : "Add a listing"}</h1>
-          <p>{existingTask ? "This copy goes to the end of the line. You can drag it anywhere later." : "Pick a listing, line up what sells next, and choose how restocks happen."}</p>
+          <button type="button" onClick={onClose}><ArrowLeft size={16} /> Listings</button>
+          <h1>Add a listing</h1>
+          <p>Pick the eBay listing you have more than one of. You&apos;ll line up the copies next.</p>
         </div>
-        <button className="builder-close" type="button" onClick={onClose} aria-label="Close task setup"><X size={18} /></button>
+        <button className="builder-close" type="button" onClick={onClose} aria-label="Close"><X size={18} /></button>
       </div>
-      <div className="builder-stepper" aria-label="Task setup progress">
-        {builderSteps.map((label, index) => {
-          const number = index + 1;
-          return (
-            <div className={number === step ? "active" : number < step ? "complete" : ""} key={label}>
-              <span>{number < step ? <Check size={13} /> : number}</span><strong>{label}</strong>
-            </div>
-          );
-        })}
-      </div>
-
       <div className="builder-card">
         {builderError && <div className="builder-error"><AlertTriangle size={15} /> {builderError}</div>}
-        {step === 1 && (
-          <BuilderListing
-            itemId={itemId}
-            listing={listing}
-            loading={loadingListing}
-            onItemId={(value) => { setItemId(value); setListing(null); setVariationKey(null); }}
-            onSync={syncListing}
-            variationKey={variationKey}
-            onVariationKey={(key) => {
-              setVariationKey(key);
-              setTargetPrice("");
-            }}
-          />
-        )}
-        {step === 2 && (
-          <div className="builder-content">
-            <span className="builder-kicker">Step 2 · Copies</span>
-            <h2>{existingTask ? "Add the next copy" : "What sells after this one?"}</h2>
-            {!existingTask && !isVariation && <div className="builder-mode" role="radiogroup" aria-label="Kind of copies">
-              <button type="button" role="radio" aria-checked={mode === "distinct"} className={mode === "distinct" ? "is-on" : ""} onClick={() => setMode("distinct")}>
-                <Upload size={18} aria-hidden="true" /><span><strong>Each copy is different</strong><small>Own photos and condition note, so buyers see the exact one.</small></span>
-              </button>
-              <button type="button" role="radio" aria-checked={mode === "identical"} className={mode === "identical" ? "is-on" : ""} onClick={() => setMode("identical")}>
-                <Layers size={18} aria-hidden="true" /><span><strong>Identical copies</strong><small>Same photos and note as the listing. Only the price can change.</small></span>
-              </button>
-            </div>}
-            {effectiveMode === "distinct" ? (
-              <BuilderCopy
-                listing={listing}
-                variationKey={variationKey}
-                files={files}
-                internalReference={internalReference}
-                conditionDescription={conditionDescription}
-                targetPrice={targetPrice}
-                onFiles={setFiles}
-                onInternalReference={setInternalReference}
-                onConditionDescription={setConditionDescription}
-                onTargetPrice={setTargetPrice}
-              />
-            ) : (
-              <div className="builder-identical">
-                {isVariation && <p className="builder-note">This is one option of a multi-option listing. Each restock puts one more of {selectedVariation?.label.replace(/^[^:]+:\s*/, "") ?? "it"} back up. Its photos stay as they are on eBay.</p>}
-                <div className="builder-identical-row">
-                  <label className="rb-field">
-                    <span>How many copies</span>
-                    <span className="rb-stepper">
-                      <button type="button" aria-label="Fewer" onClick={() => setIdenticalCount((value) => Math.max(1, value - 1))}>−</button>
-                      <input inputMode="numeric" value={identicalCount} onChange={(event) => setIdenticalCount(Math.max(1, Math.min(50, Number(event.target.value.replace(/\D/g, "")) || 1)))} aria-label="Number of copies" />
-                      <button type="button" aria-label="More" onClick={() => setIdenticalCount((value) => Math.min(50, value + 1))}>+</button>
-                    </span>
-                  </label>
-                  <label className="rb-field rb-field-grow">
-                    <span>Label</span>
-                    <input className="rb-text-input" aria-label="Internal reference" placeholder="e.g. PKXD" value={internalReference} maxLength={90} onChange={(event) => setInternalReference(event.target.value)} />
-                  </label>
-                </div>
-                <div className="builder-rule">
-                  <strong>Price per sale</strong>
-                  <small>Optional. Nudge the price up (or down) with every restock, starting from {money(basePrice, selectedVariation?.currency ?? listing?.currency)}.</small>
-                  <RuleFields rule={rule} onRule={setRule} currency={selectedVariation?.currency ?? listing?.currency ?? "USD"} />
-                  {rule.step !== 0 && <LadderPreview base={basePrice} prices={identicalPrices.filter((price): price is number => price !== null)} currency={selectedVariation?.currency ?? listing?.currency ?? "USD"} />}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-        {step === 3 && (
-          <BuilderReview
-            listing={listing}
-            variationKey={variationKey}
-            files={files}
-            mode={effectiveMode}
-            count={effectiveMode === "identical" ? identicalCount : 1}
-            internalReference={internalReference}
-            prices={effectiveMode === "identical" ? identicalPrices : [targetPrice.trim() ? Number(targetPrice) : null]}
-            delay={delay}
-            onDelay={existingTask ? null : setDelay}
-            status={status}
-          />
-        )}
+        <BuilderListing
+          itemId={itemId}
+          listing={listing}
+          loading={loadingListing}
+          onItemId={(value) => { setItemId(value); setListing(null); setVariationKey(null); }}
+          onSync={syncListing}
+          variationKey={variationKey}
+          onVariationKey={setVariationKey}
+        />
         <div className="builder-actions">
-          <button className="builder-secondary" type="button" onClick={step === 1 ? onClose : () => onStep(step - 1)}>
-            {step === 1 ? "Cancel" : "Back"}
+          <button className="builder-secondary" type="button" onClick={onClose}>Cancel</button>
+          <button className="tool-primary-button" type="button" onClick={() => void start()} disabled={loadingListing || submitting || !listing}>
+            {submitting ? <LoaderCircle className="spin" size={15} /> : null} Line up copies <ArrowRight size={15} />
           </button>
-          {step < 3 ? (
-            <button className="tool-primary-button" type="button" onClick={next} disabled={loadingListing}>
-              Continue <ArrowRight size={15} />
-            </button>
-          ) : (
-            <button className="tool-primary-button" type="button" onClick={activate} disabled={submitting}>
-              {submitting ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}
-              {submitting
-                ? "Saving"
-                : existingTask
-                  ? "Add to queue"
-                  : "Start watching"}
-            </button>
-          )}
         </div>
       </div>
     </div>
@@ -908,141 +690,6 @@ function VariationPicker({ listing, selectedKey, onSelect }: {
       </div>
       <small>Visible controls this list only. The radio chooses the variation this task monitors.</small>
     </section>
-  );
-}
-
-function BuilderCopy({
-  listing,
-  variationKey,
-  files,
-  internalReference,
-  conditionDescription,
-  targetPrice,
-  onFiles,
-  onInternalReference,
-  onConditionDescription,
-  onTargetPrice,
-}: {
-  listing: ListingSnapshot | null;
-  variationKey: string | null;
-  files: File[];
-  internalReference: string;
-  conditionDescription: string;
-  targetPrice: string;
-  onFiles: (files: File[]) => void;
-  onInternalReference: (value: string) => void;
-  onConditionDescription: (value: string) => void;
-  onTargetPrice: (value: string) => void;
-}) {
-  return (
-    <div>
-      <p className="builder-note">When the current one sells, these photos, this note, and this price replace what&apos;s on the listing.</p>
-      <div className="builder-copy-grid">
-        <div className="builder-upload-area">
-          <div className={`builder-photo-grid ${files.length ? "" : "is-empty"}`}>
-            {files.length ? files.slice(0, 12).map((file) => <LocalFilePreview file={file} key={`${file.name}-${file.lastModified}`} />) : (
-              <span className="builder-upload-placeholder"><Upload size={24} /> Photos of this exact copy</span>
-            )}
-          </div>
-          <label className="builder-file-button">
-            <Plus size={15} /> {files.length ? "Replace photos" : "Choose photos"}
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-              multiple
-              onChange={(event) => onFiles(Array.from(event.target.files ?? []))}
-            />
-          </label>
-          <small>{files.length ? `${files.length} ${files.length === 1 ? "photo" : "photos"} · first one becomes the main photo` : "JPEG, PNG, WebP, or HEIC · up to 24"}</small>
-        </div>
-        <div className="builder-fields">
-          <label>
-            <span>Label</span>
-            <input aria-label="Internal reference" placeholder="e.g. PKXD-009" value={internalReference} onChange={(event) => onInternalReference(event.target.value)} />
-          </label>
-          <label>
-            <span>Condition</span>
-            <button type="button" className="builder-select" disabled>{listing?.conditionName ?? "Good"} <Check size={14} /></button>
-          </label>
-          <label>
-            <span>Condition note</span>
-            <textarea value={conditionDescription} onChange={(event) => onConditionDescription(event.target.value)} />
-          </label>
-          <label>
-            <span>Price for this copy</span>
-            <input type="number" inputMode="decimal" min="0.01" max="999999.99" step="0.01" placeholder={`Keep ${money(listing?.price ?? null, listing?.currency)}`} value={targetPrice} onChange={(event) => onTargetPrice(event.target.value)} />
-            {targetPrice && (
-              <small>eBay may reset automatic Best Offer thresholds when the price changes.</small>
-            )}
-          </label>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function BuilderReview({
-  listing,
-  variationKey,
-  files,
-  mode,
-  count,
-  internalReference,
-  prices,
-  delay,
-  onDelay,
-  status,
-}: {
-  listing: ListingSnapshot | null;
-  variationKey: string | null;
-  files: File[];
-  mode: "distinct" | "identical";
-  count: number;
-  internalReference: string;
-  prices: Array<number | null>;
-  delay: number | null;
-  onDelay: ((value: number | null) => void) | null;
-  status: SystemStatus | null;
-}) {
-  const selected = listing?.variations.find((variation) => variation.key === variationKey);
-  const currency = selected?.currency ?? listing?.currency;
-  const live = selected?.price ?? listing?.price ?? null;
-  const dryRun = !status?.liveWritesAuthorized;
-  const first = prices[0] ?? null;
-  const last = prices.at(-1) ?? null;
-  return (
-    <div className="builder-content">
-      <span className="builder-kicker">Step 3 · Review</span>
-      <h2>Here&apos;s what will happen</h2>
-      <div className="builder-review-card">
-        <div className="builder-review-listing">
-          <ListingImage src={selected?.imageUrls[0] ?? listing?.imageUrls[0]} alt={listing?.title ?? "eBay listing"} />
-          <span><small>On eBay now</small><strong>{listing?.title}</strong><em>{selected?.label ? `${selected.label.replace(/^[^:]+:\s*/, "")} · ` : ""}{money(live, currency)} · {selected?.quantityAvailable ?? listing?.quantityAvailable} available</em></span>
-        </div>
-        <div className="builder-review-arrow"><ArrowRight size={20} /></div>
-        <div className="builder-review-listing">
-          {mode === "distinct" && files[0] ? <LocalFilePreview file={files[0]} /> : <ListingImage src={selected?.imageUrls[0] ?? listing?.imageUrls[0]} alt="Same photos as the listing" />}
-          <span><small>{count === 1 ? "Then" : `Then ${count} copies`}</small><strong>{internalReference || "Untitled"}{count > 1 ? ` 1–${count}` : ""}</strong><em>{mode === "distinct" ? `${files.length} new ${files.length === 1 ? "photo" : "photos"}` : "Same photos"} · {first === null ? "live price" : count > 1 && last !== null && last !== first ? `${money(first, currency)} → ${money(last, currency)}` : money(first, currency)}</em></span>
-        </div>
-      </div>
-      <ol className="builder-steps-plain">
-        <li>When the current one sells, the listing stays sold out for a moment.</li>
-        <li>{mode === "distinct" ? "Next swaps in this copy's photos, note, and price." : selected ? "Next sets this option's price, if it changes." : "Next updates the price, if it changes. Photos stay."}</li>
-        <li>Next checks eBay took the change, then puts one back up for sale.</li>
-      </ol>
-      {onDelay && <label className="builder-delay">
-        <span><strong>When to restock</strong><small>How long to wait after a sale before the next one goes up.</small></span>
-        <select value={String(delay)} onChange={(event) => onDelay(event.target.value === "null" ? null : Number(event.target.value))}>
-          {DELAY_OPTIONS.map((option) => <option key={String(option.value)} value={String(option.value)}>{option.label}</option>)}
-        </select>
-      </label>}
-      <div className={`builder-mode-note ${dryRun ? "is-dry" : ""}`}>
-        <ShieldCheck size={17} />
-        <span>{dryRun
-          ? <><strong>Test mode is on</strong><small>Nothing changes on eBay yet. You&apos;ll see exactly what would happen in Activity.</small></>
-          : <><strong>Live</strong><small>Restocks will change this listing on eBay.</small></>}</span>
-      </div>
-    </div>
   );
 }
 

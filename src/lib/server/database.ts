@@ -199,9 +199,22 @@ function database(): DatabaseSync {
     db.exec("ALTER TABLE copies ADD COLUMN queue_position INTEGER");
   }
   db.exec("UPDATE copies SET queue_position = rowid WHERE queue_position IS NULL");
+  const releaseColumns = db.prepare("PRAGMA table_info(copies)").all() as Array<{ name?: string }>;
+  if (!releaseColumns.some((column) => column.name === "release_delay_seconds")) {
+    db.exec("ALTER TABLE copies ADD COLUMN release_delay_seconds INTEGER");
+  }
+  if (!releaseColumns.some((column) => column.name === "grade")) {
+    db.exec("ALTER TABLE copies ADD COLUMN grade TEXT");
+  }
+  if (!releaseColumns.some((column) => column.name === "needs_approval")) {
+    db.exec("ALTER TABLE copies ADD COLUMN needs_approval INTEGER NOT NULL DEFAULT 0");
+  }
   const handoffColumns = db.prepare("PRAGMA table_info(handoff_runs)").all() as Array<{ name?: string }>;
   if (!handoffColumns.some((column) => column.name === "execute_after")) {
     db.exec("ALTER TABLE handoff_runs ADD COLUMN execute_after TEXT");
+  }
+  if (!handoffColumns.some((column) => column.name === "approved_at")) {
+    db.exec("ALTER TABLE handoff_runs ADD COLUMN approved_at TEXT");
   }
   const settingsColumns = db.prepare("PRAGMA table_info(restock_tasks)").all() as Array<{ name?: string }>;
   if (!settingsColumns.some((column) => column.name === "restock_delay_seconds")) {
@@ -377,6 +390,9 @@ function mapCopy(row: Record<string, unknown> | undefined): QueuedCopy | null {
     conditionId: asNullableString(row.condition_id),
     conditionName: asNullableString(row.condition_name),
     conditionDescription: asString(row.condition_description),
+    releaseDelaySeconds: row.release_delay_seconds === null || row.release_delay_seconds === undefined ? null : asNumber(row.release_delay_seconds),
+    needsApproval: asNumber(row.needs_approval) === 1,
+    grade: (["fair", "good", "great", "new"] as const).find((grade) => grade === row.grade) ?? null,
     status: asString(row.status) as QueuedCopy["status"],
     photos: photosForCopy(id),
     createdAt: asString(row.created_at),
@@ -477,7 +493,8 @@ export function releaseTaskLease(taskId: string, owner: string) {
 
 export function createTask(input: {
   taskId: string;
-  copyId: string;
+  /** null starts the listing with an empty line; copies are added afterwards. */
+  copyId: string | null;
   snapshot: ListingSnapshot;
   variationKey?: string | null;
   internalReference: string;
@@ -520,13 +537,15 @@ export function createTask(input: {
       timestamp,
       timestamp,
     );
+    if (input.copyId) {
+      const copyId = input.copyId;
     db.prepare(`
       INSERT INTO copies (
         id, task_id, internal_reference, condition_id, condition_name,
         condition_description, target_price, queue_position, status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'queued', ?, ?)
     `).run(
-      input.copyId,
+      copyId,
       input.taskId,
       input.internalReference,
       input.snapshot.conditionId,
@@ -545,7 +564,7 @@ export function createTask(input: {
     input.images.forEach((image, index) => {
       insertPhoto.run(
         randomUUID(),
-        input.copyId,
+        copyId,
         index,
         image.storageKey,
         image.originalName,
@@ -557,6 +576,7 @@ export function createTask(input: {
         timestamp,
       );
     });
+    }
     appendActivity({
       taskId: input.taskId,
       type: "task_activated",
@@ -583,6 +603,14 @@ export function createTask(input: {
   return created;
 }
 
+export const MAX_QUEUED_COPIES = 25;
+
+function validGrade(value: string | null | undefined): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (!["fair", "good", "great", "new"].includes(value)) throw new Error("Pick a condition: fair, good, like new, or new");
+  return value;
+}
+
 export function addQueuedCopy(input: {
   taskId: string;
   copyId: string;
@@ -590,11 +618,14 @@ export function addQueuedCopy(input: {
   internalReference: string;
   conditionDescription: string;
   targetPrice?: number | null;
+  releaseDelaySeconds?: number | null;
+  needsApproval?: boolean;
+  grade?: string | null;
   images: StoredImage[];
 }): RestockTask {
   const current = getTask(input.taskId);
   if (!current) throw new Error("Restock task not found");
-  if (current.queuedCopies.length >= 100) throw new Error("A task can queue at most 100 copies");
+  if (current.queuedCopies.length >= MAX_QUEUED_COPIES) throw new Error(`A listing can line up at most ${MAX_QUEUED_COPIES} copies`);
   if (current.itemId !== input.snapshot.itemId) throw new Error("Listing does not match the task");
   if (current.variationKey && !input.snapshot.variations.some((variation) => variation.key === current.variationKey)) {
     throw new Error("The selected variation is no longer on eBay");
@@ -615,8 +646,9 @@ export function addQueuedCopy(input: {
     db.prepare(`
       INSERT INTO copies (
         id, task_id, internal_reference, condition_id, condition_name,
-        condition_description, target_price, queue_position, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+        condition_description, target_price, queue_position, release_delay_seconds, needs_approval,
+        grade, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
     `).run(
       input.copyId,
       input.taskId,
@@ -626,6 +658,9 @@ export function addQueuedCopy(input: {
       input.conditionDescription,
       targetPrice,
       queuePosition,
+      input.releaseDelaySeconds === null || input.releaseDelaySeconds === undefined ? null : clampRestockDelay(input.releaseDelaySeconds),
+      input.needsApproval ? 1 : 0,
+      validGrade(input.grade),
       timestamp,
       timestamp,
     );
@@ -724,13 +759,17 @@ function assertQueueEditable(db: ReturnType<typeof database>, taskId: string, ti
 export function updateQueuedCopyDetails(
   taskId: string,
   copyId: string,
-  input: { internalReference?: string; conditionDescription?: string },
+  input: { internalReference?: string; conditionDescription?: string; releaseDelaySeconds?: number | null; needsApproval?: boolean; grade?: string | null },
 ): RestockTask {
   const reference = input.internalReference?.trim();
   const note = input.conditionDescription?.trim();
   if (reference !== undefined && (reference.length < 1 || reference.length > 100)) throw new Error("Internal reference must be 1 to 100 characters");
   if (note !== undefined && note.length > 1000) throw new Error("Condition note must be 1,000 characters or fewer");
-  if (reference === undefined && note === undefined) throw new Error("Nothing to update");
+  const timing = input.releaseDelaySeconds !== undefined || input.needsApproval !== undefined || input.grade !== undefined;
+  if (reference === undefined && note === undefined && !timing) throw new Error("Nothing to update");
+  if (input.releaseDelaySeconds !== undefined && input.releaseDelaySeconds !== null && !Number.isFinite(Number(input.releaseDelaySeconds))) {
+    throw new Error("Wait time must be a number of seconds");
+  }
   const db = database();
   const timestamp = now();
   db.exec("BEGIN IMMEDIATE");
@@ -742,9 +781,21 @@ export function updateQueuedCopyDetails(
       UPDATE copies SET
         internal_reference = COALESCE(?, internal_reference),
         condition_description = COALESCE(?, condition_description),
+        release_delay_seconds = CASE WHEN ? THEN ? ELSE release_delay_seconds END,
+        needs_approval = COALESCE(?, needs_approval),
+        grade = CASE WHEN ? THEN ? ELSE grade END,
         updated_at = ?
       WHERE id = ? AND task_id = ? AND status = 'queued'
-    `).run(reference ?? null, note ?? null, timestamp, copyId, taskId);
+    `).run(
+      reference ?? null,
+      note ?? null,
+      input.releaseDelaySeconds !== undefined ? 1 : 0,
+      input.releaseDelaySeconds === undefined || input.releaseDelaySeconds === null ? null : clampRestockDelay(Number(input.releaseDelaySeconds)),
+      input.needsApproval === undefined ? null : input.needsApproval ? 1 : 0,
+      input.grade !== undefined ? 1 : 0,
+      input.grade === undefined ? null : validGrade(input.grade),
+      timestamp, copyId, taskId,
+    );
     if (result.changes !== 1) throw new Error("Queued copy not found or already in use");
     db.exec("COMMIT");
   } catch (error) {
@@ -1021,6 +1072,7 @@ export interface HandoffRun {
   triggerQuantitySold: number;
   status: string;
   executeAfter: string | null;
+  approvedAt: string | null;
   ebayPictureUrls: string[];
   error: string | null;
 }
@@ -1043,15 +1095,30 @@ export function getOrCreateHandoffRun(taskId: string, triggerQuantitySold: numbe
     triggerQuantitySold: asNumber(row.trigger_quantity_sold),
     status: asString(row.status),
     executeAfter: asNullableString(row.execute_after),
+    approvedAt: asNullableString(row.approved_at),
     ebayPictureUrls: parseJson<string[]>(row.ebay_picture_urls_json, []),
     error: asNullableString(row.error),
   };
 }
 
+/** Approve the restock that is waiting on the seller. Returns false when nothing is waiting. */
+export function approveHandoffRun(taskId: string): boolean {
+  const db = database();
+  const timestamp = now();
+  const result = db.prepare(`
+    UPDATE handoff_runs SET approved_at = ?, status = 'created', error = NULL, updated_at = ?
+    WHERE task_id = ? AND status = 'awaiting_approval'
+  `).run(timestamp, timestamp, taskId);
+  if (result.changes === 0) return false;
+  db.prepare("UPDATE restock_tasks SET status = 'active', updated_at = ? WHERE id = ? AND status = 'awaiting_approval'").run(timestamp, taskId);
+  appendActivity({ taskId, type: "restock_approved", level: "info", message: "You approved the next restock", details: {} });
+  return true;
+}
+
 export function scheduleHandoffRun(runId: string, executeAfter: string): boolean {
   const result = database().prepare(`
     UPDATE handoff_runs SET status = 'scheduled', execute_after = ?, error = NULL, updated_at = ?
-    WHERE id = ? AND status IN ('created', 'blocked', 'dry_run')
+    WHERE id = ? AND status IN ('created', 'blocked', 'dry_run', 'awaiting_approval')
   `).run(executeAfter, now(), runId);
   return result.changes === 1;
 }

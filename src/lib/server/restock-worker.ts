@@ -160,7 +160,10 @@ function scheduleOrWaitForRestock(
     };
   }
   if (!["created", "blocked", "dry_run"].includes(run.status)) return null;
-  const scheduledFor = new Date(Date.now() + restockDelaySeconds(task.restockDelaySeconds) * 1000).toISOString();
+  const delay = run.approvedAt
+    ? restockDelaySeconds(15)
+    : restockDelaySeconds(task.queuedCopy?.releaseDelaySeconds ?? task.restockDelaySeconds);
+  const scheduledFor = new Date(Date.now() + delay * 1000).toISOString();
   if (!scheduleHandoffRun(run.id, scheduledFor)) return null;
   setTaskStatus(task.id, "scheduled");
   appendActivity({
@@ -179,6 +182,22 @@ function scheduleOrWaitForRestock(
     plan,
     scheduledFor,
   };
+}
+
+/** Hold a sale's restock until the seller approves it, when the next copy asks for that. */
+function approvalGate(task: RestockTask, listing: ListingSnapshot, plan: RestockPlan, run: HandoffRun): WorkerResult | null {
+  if (!task.queuedCopy?.needsApproval || run.approvedAt) return null;
+  if (run.status !== "awaiting_approval") updateHandoffRun(run.id, { status: "awaiting_approval", error: null });
+  setTaskStatus(task.id, "awaiting_approval");
+  appendActivity({
+    taskId: task.id,
+    type: "awaiting_approval",
+    level: "info",
+    message: `Sold. ${task.queuedCopy.internalReference} is ready and waiting for your OK.`,
+    details: { copyId: task.queuedCopy.id },
+    dedupeKey: `awaiting-approval:${run.id}`,
+  });
+  return { taskId: task.id, action: "awaiting_approval", message: "Waiting for your OK to put the next copy up", listing, plan };
 }
 
 async function announceRestocking(taskId: string, listing: ListingSnapshot, plan: RestockPlan): Promise<void> {
@@ -234,6 +253,8 @@ async function processVariationTask(
     setTaskStatus(task.id, "attention", message);
     return { taskId: task.id, action: "skipped", message, listing, plan };
   }
+  const waitingOnSeller = approvalGate(task, listing, plan, run);
+  if (waitingOnSeller) return waitingOnSeller;
   const status = systemStatus();
   if (!status.liveWritesAuthorized) {
     const message = `Dry-run ready: ${status.liveWritesBlocker ?? "live writes are blocked"}`;
@@ -408,6 +429,9 @@ async function processTaskWithLease(taskId: string, owner: string): Promise<Work
     });
     return { taskId, action: "held_at_zero", message, listing, plan };
   }
+
+  const waitingOnSeller = approvalGate(refreshedTask, listing, plan, run);
+  if (waitingOnSeller) return waitingOnSeller;
 
   const status = systemStatus();
   if (!status.liveWritesAuthorized) {
