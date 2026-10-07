@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-const clip = (name: string) => ({ video: `/demos/${name}.mp4?v=10`, poster: `/demos/${name}.jpg?v=10` });
+const clip = (name: string) => ({ video: `/demos/${name}.mp4?v=11`, poster: `/demos/${name}.jpg?v=11` });
 
 const steps = [
   {
