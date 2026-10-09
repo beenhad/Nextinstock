@@ -4,6 +4,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { CopyCommand } from "@/components/copy-command";
 import { SiteHeader } from "@/components/site-header";
 import { RepeatStockShowcase } from "@/components/repeat-stock-showcase";
+import { HeroReleaseLine } from "@/components/hero-release-line";
 import { REPO_URL } from "@/lib/site";
 
 const sellerStories = [
@@ -69,7 +70,7 @@ export default function HomePage() {
             </div>
           </div>
           <div className="hero-visual-wrap">
-            <img className="hero-shot" src="/demos/hero-release-line.webp" width={1984} height={772} alt="Next's release line: the copy on eBay now, followed by the copies lined up to sell next, each with its own price." />
+            <HeroReleaseLine />
           </div>
         </div>
       </section>
