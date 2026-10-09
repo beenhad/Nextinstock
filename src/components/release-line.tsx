@@ -76,10 +76,10 @@ function unitCopies(unit: Unit): QueuedCopy[] {
 
 type Density = "lg" | "md" | "sm" | "xs";
 const SIZES: Array<{ name: Density; tile: number; gap: number }> = [
-  { name: "lg", tile: 112, gap: 64 },
-  { name: "md", tile: 92, gap: 54 },
-  { name: "sm", tile: 72, gap: 38 },
-  { name: "xs", tile: 56, gap: 22 },
+  { name: "lg", tile: 112, gap: 96 },
+  { name: "md", tile: 92, gap: 80 },
+  { name: "sm", tile: 72, gap: 64 },
+  { name: "xs", tile: 56, gap: 28 },
 ];
 
 /** Biggest tiles that keep the whole line on one row; the smallest size wraps when even that won't fit. */
@@ -289,7 +289,7 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
             })}
           </SortableContext>
           <li className="rl-item">
-            <span className="rl-link is-plain" aria-hidden="true" />
+            <span className="rl-link is-plain is-add-link" aria-hidden="true" />
             <button
               type="button"
               className={`rl-node is-add ${selection?.type === "add" || selection?.type === "new" ? "is-selected" : ""} ${copies.length === 0 ? "is-invite" : ""}`}
@@ -404,7 +404,7 @@ function SortableUnit({ unit, size, live, livePhoto, currency, selected, linkSel
   const first = unitCopies(unit)[0];
   const timing = timingOf(first);
   const style: CSSProperties = { transform: CSS.Translate.toString(transform), transition, viewTransitionName: `rl-${unit.id}` };
-  const chip = timing.kind === "now" ? (size === "lg" ? timing.label : "") : size === "lg" ? timing.label : timing.short;
+  const chip = timing.kind === "now" ? "" : timing.short;
   return <li className={`rl-item ${isDragging ? "is-ghost" : ""}`} ref={setNodeRef} style={style}>
     <button
       type="button"
