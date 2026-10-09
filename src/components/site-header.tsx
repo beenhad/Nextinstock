@@ -12,7 +12,7 @@ export function SiteHeader() {
         </Link>
         <nav className="site-nav" aria-label="Main navigation">
           <a href="/#how-it-works">How it works</a>
-          <a href="/#feedback">Feedback</a>
+          <a href="/#sellers">Feedback</a>
           <a href="/#open-source">Open source</a>
           <Link href="/docs">Docs</Link>
         </nav>

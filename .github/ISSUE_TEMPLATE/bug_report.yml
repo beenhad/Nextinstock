@@ -1,0 +1,39 @@
+name: Bug report
+description: Something in setup, the restock queue, alerts, or the site is not working.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: "Please leave out keys, webhook URLs, buyer information, and private seller details. [Report security problems privately](https://github.com/beenhad/Nextinstock/security/advisories/new)."
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where did it happen?
+      options:
+        - Setup or local app
+        - eBay connection
+        - Restock queue
+        - Discord alerts
+        - Website or docs
+        - Somewhere else
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened?
+      description: Include the steps that led to it, using a test listing or redacted details.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Your setup
+      description: macOS and Node versions, and dry-run or live mode if relevant.
+      placeholder: macOS 15, Node 22, dry-run mode
