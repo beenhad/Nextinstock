@@ -261,7 +261,7 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
         {graded >= 2 && <button type="button" className="rl-quiet" onClick={sortWorstToBest} disabled={locked}>Sort worst to best</button>}
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={(event) => setDragging(String(event.active.id))} onDragEnd={dragEnd} onDragCancel={() => setDragging(null)}>
+      <DndContext id={`release-line-${task.id}`} sensors={sensors} collisionDetection={closestCenter} onDragStart={(event) => setDragging(String(event.active.id))} onDragEnd={dragEnd} onDragCancel={() => setDragging(null)}>
         <ol className="rl-flow" aria-label="Release order, first to sell on the left">
           <li className="rl-item">
             <div className="rl-node is-live" data-key="node-live" key={`${livePhoto}-${live}`}>
@@ -349,6 +349,7 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
             live={live}
             livePhoto={livePhoto}
             currency={currency}
+            isVariation={isVariation}
             locked={locked}
             canAdd={!full}
             onAddOne={() => void addSame(1, selectedUnit.copies.at(-1))}
@@ -548,13 +549,50 @@ function TimingEditor({ title, after, copy, locked, onChange, onClose }: {
   </div>;
 }
 
+function CopyIdentityFields({ copy, locked, own, isVariation, onAction }: {
+  copy: QueuedCopy; locked: boolean; own: boolean; isVariation: boolean;
+  onAction: (body: QueueAction) => Promise<boolean>;
+}) {
+  const [reference, setReference] = useState(copy.internalReference);
+  const [note, setNote] = useState(copy.conditionDescription);
+  useEffect(() => setReference(copy.internalReference), [copy.internalReference]);
+  useEffect(() => setNote(copy.conditionDescription), [copy.conditionDescription]);
+  return <>
+    <div className="rl-row is-top"><span>Your SKU / ref</span>
+      <div><input className="rl-input" value={reference} maxLength={100} disabled={locked} aria-label={`SKU or reference for ${copy.internalReference}`}
+        onChange={(event) => setReference(event.target.value)}
+        onBlur={() => {
+          const value = reference.trim();
+          if (!value) { setReference(copy.internalReference); return; }
+          if (value !== copy.internalReference) void onAction({ action: "details", internalReference: value }).then((ok) => { if (!ok) setReference(copy.internalReference); });
+        }}
+        onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+        <p className="rl-help">Saved in Next only. It does not edit the eBay SKU or an order that already sold.</p></div>
+    </div>
+    <div className="rl-row is-top"><span>Condition note</span>
+      <div><input className="rl-input" value={note} maxLength={1000} disabled={locked} aria-label={`Condition note for ${copy.internalReference}`}
+        placeholder={own ? "What's different about this copy?" : "Blank keeps the listing's note"}
+        onChange={(event) => setNote(event.target.value)}
+        onBlur={() => {
+          const value = note.trim();
+          if (own && !value) { setNote(copy.conditionDescription); return; }
+          if (value !== copy.conditionDescription) void onAction({ action: "details", conditionDescription: value }).then((ok) => { if (!ok) setNote(copy.conditionDescription); });
+        }}
+        onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+        <p className="rl-help">{isVariation
+          ? "Kept in Next only. Variation restocks leave the shared eBay condition note alone."
+          : own
+            ? "Replaces the eBay condition note when this copy goes live; it cannot change a completed sale."
+            : "Optional. Blank keeps the current eBay condition note; text here replaces it when this copy goes live."}</p></div>
+    </div>
+  </>;
+}
+
 function CopyEditor({ copy, index, count, live, currency, locked, onAction, onClose }: {
   copy: QueuedCopy; index: number; count: number; live: number | null; currency: string; locked: boolean;
   onAction: (body: QueueAction) => Promise<boolean>; onClose: () => void;
 }) {
-  const [note, setNote] = useState(copy.conditionDescription);
   const [confirming, setConfirming] = useState(false);
-  useEffect(() => setNote(copy.conditionDescription), [copy.conditionDescription]);
   const own = copy.photos.length > 0;
   return <div className="rl-sheet rl-editor">
     <div className="rl-photos">
@@ -579,13 +617,7 @@ function CopyEditor({ copy, index, count, live, currency, locked, onAction, onCl
           <small>{copy.targetPrice === null ? "Leave empty to keep the eBay price." : ""}</small>
         </div>
       </div>
-      <div className="rl-row"><span>Note</span>
-        <input className="rl-input" value={note} maxLength={1000} disabled={locked}
-          placeholder={own ? "What's different about this copy?" : "Leave empty to keep the listing's note"}
-          onChange={(event) => setNote(event.target.value)}
-          onBlur={() => { const value = note.trim(); if (value !== copy.conditionDescription) { if (own && !value) setNote(copy.conditionDescription); else void onAction({ action: "details", conditionDescription: value }); } }}
-          onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
-      </div>
+      <CopyIdentityFields copy={copy} locked={locked} own={own} isVariation={false} onAction={onAction} />
       <div className="rl-row"><span>Goes up</span>
         <TimingChoice copy={copy} locked={locked} onChange={onAction} after={index === 0 ? "the one on eBay" : `#${index}`} />
       </div>
@@ -602,8 +634,8 @@ function CopyEditor({ copy, index, count, live, currency, locked, onAction, onCl
   </div>;
 }
 
-function RunEditor({ copies, start, live, livePhoto, currency, locked, canAdd, onAddOne, onQueueAction, onPatch, onClose }: {
-  copies: QueuedCopy[]; start: number; live: number | null; livePhoto: string | null; currency: string; locked: boolean; canAdd: boolean;
+function RunEditor({ copies, start, live, livePhoto, currency, isVariation, locked, canAdd, onAddOne, onQueueAction, onPatch, onClose }: {
+  copies: QueuedCopy[]; start: number; live: number | null; livePhoto: string | null; currency: string; isVariation: boolean; locked: boolean; canAdd: boolean;
   onAddOne: () => void; onQueueAction: (copyId: string, body: QueueAction) => Promise<boolean>;
   onPatch: (patch: TaskPatch) => Promise<boolean>; onClose: () => void;
 }) {
@@ -656,6 +688,15 @@ function RunEditor({ copies, start, live, livePhoto, currency, locked, canAdd, o
           </div>}
         </div>
       </div>
+      <details className="rl-copy-details">
+        <summary>SKU &amp; notes for each copy</summary>
+        <div className="rl-copy-details-list">
+          {copies.map((copy, index) => <section key={copy.id} className="rl-copy-details-item" aria-label={`Copy ${start + index + 1} details`}>
+            <strong>#{start + index + 1}</strong>
+            <CopyIdentityFields copy={copy} locked={locked || copy.id.startsWith("pending-")} own={false} isVariation={isVariation} onAction={(body) => onQueueAction(copy.id, body)} />
+          </section>)}
+        </div>
+      </details>
       {copies.length > 1
         ? <div className="rl-row"><span>Between them</span>
           <TimingChoice copy={copies[1]} locked={locked} after="the one before"
@@ -696,6 +737,7 @@ function NewCopyForm({ index, live, currency, onCancel, onSave }: {
   const [previews, setPreviews] = useState<string[]>([]);
   const [grade, setGrade] = useState<CopyGrade | null>(null);
   const [price, setPrice] = useState("");
+  const [reference, setReference] = useState(`COPY-${index}`);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [over, setOver] = useState(false);
@@ -709,7 +751,7 @@ function NewCopyForm({ index, live, currency, onCancel, onSave }: {
     const images = Array.from(list ?? []).filter((file) => file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name));
     if (images.length) setFiles((current) => [...current, ...images].slice(0, 24));
   }
-  const ready = files.length > 0 && note.trim().length > 0;
+  const ready = files.length > 0 && reference.trim().length > 0 && note.trim().length > 0;
   return <div className="rl-sheet rl-editor">
     <div
       className={`rl-drop ${over ? "is-over" : ""} ${files.length ? "has-files" : ""}`}
@@ -740,14 +782,19 @@ function NewCopyForm({ index, live, currency, onCancel, onSave }: {
           <small>{price ? "" : `Empty keeps the eBay price${live === null ? "" : ` (${money(live, currency)})`}.`}</small>
         </div>
       </div>
-      <div className="rl-row"><span>Note</span>
-        <input className="rl-input" value={note} maxLength={1000} placeholder="e.g. No manual, light disc scratches, tested" onChange={(event) => setNote(event.target.value)} />
+      <div className="rl-row is-top"><span>Your SKU / ref</span>
+        <div><input className="rl-input" value={reference} maxLength={100} aria-label="Your SKU or reference" onChange={(event) => setReference(event.target.value)} />
+          <p className="rl-help">For your records in Next. It does not change the eBay SKU or a completed order.</p></div>
+      </div>
+      <div className="rl-row is-top"><span>Condition note</span>
+        <div><input className="rl-input" value={note} maxLength={1000} aria-label="Condition note" placeholder="e.g. No manual, light disc scratches, tested" onChange={(event) => setNote(event.target.value)} />
+          <p className="rl-help">Shown on the eBay listing when this copy goes live. It cannot change a sale that already happened.</p></div>
       </div>
       <div className="rl-sheet-foot">
         <span className="rl-help">{!files.length ? "Add photos of this exact copy." : !note.trim() ? "Describe this copy's condition." : "Ready to add."}</span>
         <button type="button" className="rl-primary" disabled={!ready || saving} onClick={async () => {
           setSaving(true);
-          const ok = await onSave({ reference: `COPY-${index}`, files, grade, price, note: note.trim() });
+          const ok = await onSave({ reference: reference.trim(), files, grade, price, note: note.trim() });
           setSaving(false);
           if (!ok) return;
         }}>{saving ? <LoaderCircle size={15} className="spin" /> : <Plus size={15} />} Add to the line</button>
