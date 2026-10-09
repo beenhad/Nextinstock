@@ -7,14 +7,22 @@ import { RepeatStockShowcase } from "@/components/repeat-stock-showcase";
 import { HeroReleaseLine } from "@/components/hero-release-line";
 import { REPO_URL } from "@/lib/site";
 
-const sellerStories = [
-  { quote: "Had six sealed ETBs and was relisting one by hand every time it sold. Now I line them all up, bump each one a dollar, and go to bed. Woke up to two sales and the listing never went dark.", initials: "HH", who: "Holo Hollow", what: "Pokémon" },
-  { quote: "Every raw copy of the same rookie is a little different. I shoot each one, give it its own price, and the buyer gets the exact card in the photos. One listing, sold count keeps climbing.", initials: "TT", who: "Toploader Tuesday", what: "Sports cards" },
-  { quote: "One copy in the display case, four in the back. I used to forget to relist the second one sold. Now the next one is up before I'm done packing the first.", initials: "BR", who: "Back Room Bargains", what: "Video games" },
-  { quote: "Anything over a couple hundred I set to When I say so. Discord pings me, I give it a once-over, hit Put it up. Everything cheaper just runs on its own.", initials: "AG", who: "Attic Grails", what: "Collectibles" },
-  { quote: "I test every console myself and no two look the same. Each one gets its own photos and grade, and I haven't rebuilt a listing from scratch since.", initials: "CC", who: "Cartridge Cove", what: "Retro consoles" },
-  { quote: "Same pressing, different wear. I grade them, sort worst to best, and the cheap copies go first while the clean ones wait. Honestly kind of fun to watch.", initials: "GP", who: "Groove Pantry", what: "Vinyl records" },
+const feedbackTopics = [
+  { label: "A bug", title: "What broke?", detail: "A screenshot, the listing type, and what you expected to happen are plenty to start with." },
+  { label: "A rough edge", title: "What felt like work?", detail: "If a step makes you stop and think when you should be packing orders, we want to hear it." },
+  { label: "An idea", title: "What would help your shop?", detail: "Cards, games, records, collectibles: tell us how your inventory actually works." },
 ];
+
+const softwareSchema = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Nextinstock",
+  url: "https://nextinstock.com/",
+  description: "Free, open-source software that restocks the same eBay listing after each sale.",
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "macOS",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+};
 
 const faqs = [
   {
@@ -51,6 +59,7 @@ npm run build && npm run start:local`;
 export default function HomePage() {
   return (
     <main>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareSchema) }} />
       <SiteHeader />
 
       <section className="hero-section">
@@ -86,26 +95,25 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="seller-stories-section" id="sellers">
+      <section className="feedback-section" id="feedback">
         <div className="site-container">
-          <div className="seller-stories-heading">
-            <div>
-              <span className="section-kicker">Seller stories</span>
-              <h2>Anyone selling more than one of something.</h2>
-            </div>
+          <div className="feedback-heading">
+            <span className="section-kicker">Feedback</span>
+            <h2>Tell us how it goes in your shop.</h2>
+            <p>Trying Next with your own listings? Tell us where it helps and where it gets in your way. No polished review needed.</p>
+          </div>
+          <div className="feedback-grid">
+            {feedbackTopics.map((topic) => <article className="feedback-card" key={topic.label}>
+              <span>{topic.label}</span>
+              <h3>{topic.title}</h3>
+              <p>{topic.detail}</p>
+            </article>)}
+          </div>
+          <div className="feedback-actions">
+            <a className="primary-link" href={`${REPO_URL}/issues/new`} target="_blank" rel="noreferrer">Share feedback on GitHub <ArrowRight size={16} aria-hidden="true" /></a>
+            <p>Issues are public. Leave out eBay keys and buyer details.</p>
           </div>
         </div>
-        <div className="seller-scroller" tabIndex={0} aria-label="How different sellers use Next">
-          {sellerStories.map((story) => <article className="seller-story-card" key={story.who}>
-            <span className="seller-story-quote-mark" aria-hidden="true">&ldquo;</span>
-            <blockquote>{story.quote}</blockquote>
-            <div className="seller-story-person">
-              <span className="seller-story-avatar" aria-hidden="true">{story.initials}</span>
-              <div><strong>{story.who}</strong><span>{story.what}</span></div>
-            </div>
-          </article>)}
-        </div>
-        <div className="site-container"><p className="seller-stories-note">Example stories showing how different sellers use Next. Store names are made up.</p></div>
       </section>
 
       <section className="oss-section" id="open-source">
@@ -178,7 +186,7 @@ export default function HomePage() {
           </div>
           <nav className="footer-nav" aria-label="Footer navigation">
             <a href="#how-it-works">How it works</a>
-            <a href="#sellers">Stories</a>
+            <a href="#feedback">Feedback</a>
             <a href="#open-source">Open source</a>
             <a href="#faq">FAQ</a>
             <a href="/docs">Setup guide</a>
