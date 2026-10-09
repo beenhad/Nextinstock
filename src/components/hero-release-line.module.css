@@ -98,11 +98,9 @@
   top: 11.75cqw;
   width: 7.3cqw;
   text-align: center;
-  transition: left 220ms ease;
 }
 .liveNode { left: 5.1cqw; }
 .dragging { z-index: 5; }
-.dragging .tile { cursor: grabbing; box-shadow: 0 .7cqw 1.7cqw rgb(20 30 60 / 18%); }
 .addNode { left: 74cqw; }
 .tile {
   position: relative;
@@ -120,6 +118,9 @@
 .tile:active { transform: scale(.96); }
 .node:not(.liveNode):not(.addNode) .tile { cursor: grab; touch-action: none; }
 .tile.selected { transform: translateY(-.25cqw); border-color: #3665f3; box-shadow: 0 0 0 .4cqw rgb(54 101 243 / 15%); }
+/* A picked-up copy lifts instead of shrinking under the pointer. */
+.dragging .tile,
+.dragging .tile:active { cursor: grabbing; transform: translateY(-.35cqw) scale(1.05); border-color: #aeb7ca; box-shadow: 0 .9cqw 2cqw rgb(20 30 60 / 20%); }
 .tile img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .liveTile { border-color: #4fa52a; box-shadow: 0 0 0 .55cqw rgb(79 165 42 / 13%); }
 .liveTile:hover, .liveTile.selected { border-color: #4fa52a; box-shadow: 0 0 0 .55cqw rgb(79 165 42 / 20%); }
@@ -242,6 +243,6 @@
 @keyframes statusPulse { from { box-shadow: 0 0 0 0 rgb(47 143 31 / 35%); } to { box-shadow: 0 0 0 .38cqw rgb(47 143 31 / 9%); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .frame button, .node, .stackNode::before, .stackNode::after, .addTile svg { transition: none; }
+  .frame button, .stackNode::before, .stackNode::after, .addTile svg { transition: none; }
   .refresh svg, .statusDot { animation: none; }
 }

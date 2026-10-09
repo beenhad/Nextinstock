@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
-import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent, type Modifier } from "@dnd-kit/core";
 import { arrayMove, rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Plus, RefreshCw } from "lucide-react";
@@ -23,6 +23,15 @@ const slots = [17.9, 30.6, 45.5, 61];
 const connectorClasses = [styles.connectorOne, styles.connectorTwo, styles.connectorThree, styles.connectorFour, styles.connectorFive];
 
 const dotCycle: DotColor[] = ["amber", "green", "red"];
+
+// Copies only slide along the line: no vertical drift, and never outside the
+// release line's canvas.
+const alongTheLine: Modifier = ({ transform, draggingNodeRect, containerNodeRect }) => {
+  if (!draggingNodeRect || !containerNodeRect) return { ...transform, y: 0 };
+  const min = containerNodeRect.left - draggingNodeRect.left;
+  const max = containerNodeRect.right - draggingNodeRect.right;
+  return { ...transform, x: Math.min(Math.max(transform.x, min), max), y: 0 };
+};
 
 export function HeroReleaseLine() {
   const [selected, setSelected] = useState<string | null>(null);
@@ -101,7 +110,8 @@ export function HeroReleaseLine() {
         <strong className={`${styles.price} ${styles.livePrice}`}>$139.99</strong>
       </div>
 
-      <DndContext id="hero-release-line" sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorder}>
+      <DndContext id="hero-release-line" sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorder}
+        modifiers={[alongTheLine]} autoScroll={false}>
         <SortableContext items={order} strategy={rectSortingStrategy}>
           {positions.map(({ id, x, number }) => <SortableCopy key={id} id={id} x={x} number={number}
             color={dotColors[id]} selected={selected === id} onSelect={() => toggleSelected(id)} onCycleDot={() => cycleDot(id)} />)}
@@ -122,7 +132,7 @@ function SortableCopy({ id, x, number, color, selected, onSelect, onCycleDot }: 
   const isStack = id === "stack";
   const label = isStack ? `copies ${number} through ${number + 2}, three identical ETBs` : `copy ${number}`;
   return <div ref={setNodeRef} className={`${styles.node} ${isStack ? styles.stackNode : ""} ${isDragging ? styles.dragging : ""}`}
-    style={{ left: `${x}cqw`, transform: CSS.Transform.toString(transform), transition: transition ? `${transition}, left 220ms ease` : undefined } as CSSProperties}>
+    style={{ left: `${x}cqw`, transform: CSS.Translate.toString(transform), transition } as CSSProperties}>
     <button ref={setActivatorNodeRef} type="button" className={`${styles.tile} ${isStack ? styles.stackTile : ""} ${selected ? styles.selected : ""}`}
       {...attributes} {...listeners} onClick={onSelect} aria-label={`Highlight ${label}; drag to reorder`} aria-pressed={selected} title={`Drag to reorder ${label}`}>
       <img src={productPhoto} alt="" draggable={false} />
