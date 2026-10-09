@@ -70,8 +70,9 @@ export function ToolSupport({ status, onNewTask, onSettings }: {
           <section className="support-section" id="copies">
             <div className="support-section-heading"><ListOrdered size={20} /><div><h2>Copies, photos & pricing</h2><p>Prepare the sequence before the sales arrive.</p></div></div>
             <ul className="support-list">
-              <li><strong>Queue order.</strong> Add up to 100 physical copies per task. Use the arrows in the task’s copy list to move a copy earlier or later.</li>
-              <li><strong>Internal reference.</strong> Name each copy so you can match it to your shelf, bin, or inventory record.</li>
+              <li><strong>Queue order.</strong> Add up to 25 physical copies per task. Drag copies in the release line to change their order.</li>
+              <li><strong>Your SKU / reference.</strong> Name each queued copy so you can match it to your shelf or inventory record. This stays in Next; it does not edit the eBay SKU or a completed order.</li>
+              <li><strong>Condition note.</strong> On a single-item listing, a queued copy with its own photos applies this note at handoff. An identical copy with a blank note keeps the live note. Variation notes stay in Next because eBay shares the listing condition.</li>
               <li><strong>Single-item photos.</strong> Add 1–24 JPEG, PNG, WebP, or HEIC photos and a condition note for the next physical copy. Those photos replace the listing’s complete photo set during a live handoff.</li>
               <li><strong>Restock price.</strong> Set a price per copy, or leave it blank to keep the live eBay price. You can edit a queued price before it is applied. A price change may reset eBay’s automatic Best Offer thresholds.</li>
               <li><strong>Local storage.</strong> Queued photos and the task ledger live on this machine. Back up the data folder shown in Settings.</li>
@@ -86,6 +87,7 @@ export function ToolSupport({ status, onNewTask, onSettings }: {
               <div><span>03</span><strong>Apply and verify</strong><p>In live mode, the worker applies the next copy’s supported details, reads eBay back, then restores one available unit.</p></div>
             </div>
             <div className="support-note"><ShieldCheck size={18} /><span>Missing copy data, an unsupported listing, or a failed eBay check holds the quantity at zero. Dry-run mode records the plan but makes no eBay changes.</span></div>
+            <p>If the sale already left the listing at zero, you can add the next copy and request a fresh check. Next can restock after its checks and hold when the trigger matches. Your SKU and note only affect that queued handoff; they cannot change the sale that already completed.</p>
             <p>A manual quantity change to zero without a new sale does not trigger an already armed task. Use the task’s check button to request a fresh read; it does not skip the hold or the write gate.</p>
           </section>
 

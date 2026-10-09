@@ -104,6 +104,7 @@ export default function DocsPage() {
             <div><strong>Another of the same</strong><span>Reuses the listing&apos;s current photos. Use it for identical stock and add as many as you have in one go.</span></div>
           </div>
           <p>Drag copies to change the order. For a variation, Next restocks that option&apos;s quantity and price; its eBay photos stay as they are.</p>
+          <p>Give each queued copy your own SKU or reference in the dashboard. That label stays in Next and never changes the eBay SKU or an order that already sold. A single-item copy&apos;s condition note goes to eBay when its handoff runs; an identical copy can leave it blank to keep the current note. Variation notes stay in Next.</p>
         </section>
 
         <section className="docs-section" id="pace">
