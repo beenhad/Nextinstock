@@ -4,6 +4,7 @@ import { ToolPrototype } from "@/components/tool-prototype";
 export const metadata: Metadata = {
   title: "Restock queue — Nextinstock",
   description: "Set up and manage copy-specific restock tasks for synced eBay listings.",
+  robots: { index: false, follow: false },
 };
 
 export default function ToolPage() {

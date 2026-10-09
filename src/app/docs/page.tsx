@@ -6,8 +6,21 @@ import { SiteHeader } from "@/components/site-header";
 import { REPO_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: "Setup guide · Next",
+  title: "Setup guide · Nextinstock",
   description: "Install Next on a Mac, connect eBay, line up copies on a listing, and turn on Discord alerts.",
+  alternates: { canonical: "/docs" },
+  openGraph: {
+    type: "article",
+    url: "/docs",
+    siteName: "Nextinstock",
+    title: "Set up Nextinstock on your Mac",
+    description: "Install Nextinstock, connect eBay, test a restock, and turn on Discord alerts.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Set up Nextinstock on your Mac",
+    description: "Install Nextinstock, connect eBay, test a restock, and turn on Discord alerts.",
+  },
 };
 
 const sections = [

@@ -15,7 +15,9 @@
   <img src="public/demos/hero-release-line.webp" width="880" alt="The release line: the copy on eBay now, followed by the copies lined up to sell next, each with its own price.">
 </p>
 
-Next keeps an eBay listing in stock for you. Line up every copy you have, each with its own photos and price or a stack of the same. When one sells, Next puts the next one up on the **same item number**, so the listing keeps its sold count instead of starting over.
+Got five copies of a game and one eBay listing that already has a sold count? That's the headache Next is built for. Line up the copies once. When one sells, Next puts the next one on the **same item number** instead of making you start a new listing.
+
+It's free, open source, and runs on your Mac. You can watch a dry run before you let it touch a live listing. 📦
 
 <p align="center">
   <picture>
@@ -28,9 +30,9 @@ Next keeps an eBay listing in stock for you. Line up every copy you have, each w
   <img src=".github/readme/restock.gif" width="760" alt="A copy sells and the next one goes live on the same listing.">
 </p>
 
-## Quick start
+## Get it running
 
-You need a Mac with Node.js 22+, an eBay seller account, and your own eBay developer keys.
+You'll need a Mac with Node.js 22+, an eBay seller account, and your own eBay developer keys. No Next account to make.
 
 ```bash
 git clone https://github.com/beenhad/Nextinstock.git
@@ -41,23 +43,24 @@ npm run build
 npm run start:local      # app + worker
 ```
 
-Open [127.0.0.1:3000/tool](http://127.0.0.1:3000/tool). Put your eBay keys in `.env.local` (never in a chat or a commit). Next starts in **test mode** and won't change anything on eBay until you turn live mode on.
+Open [127.0.0.1:3000/tool](http://127.0.0.1:3000/tool). Put your eBay keys in `.env.local` on your own machine, never in a chat or commit. Next starts in **test mode**; it won't change an eBay listing until you explicitly turn live mode on.
 
-The full walkthrough is at **[nextinstock.com/docs](https://nextinstock.com/docs)**. Prefer to set up with an AI assistant? Follow [INSTALL_WITH_AI.md](INSTALL_WITH_AI.md).
+If the eBay developer setup feels fiddly, the [step-by-step guide](https://nextinstock.com/docs) goes through it. There's also an [AI-assisted setup guide](INSTALL_WITH_AI.md) if that's your thing.
 
-## What it does
+## What you can line up
 
-- **Different copies:** each one has its own photos, condition, price and note. Buyers see exactly the copy they'll get.
-- **Same copies:** stack as many as you have on the listing's existing photos, and step the price up per copy if you want.
-- **Pace:** each copy goes up right away, after a wait you choose, or only when you say so.
-- **Variations:** pick the exact option and Next restocks that option's quantity and price.
-- **Discord alerts:** get a message on every sale and restock, plus a *Put it up* link when a copy is waiting on you.
-- **Local:** runs on your Mac. Your keys, photos and history never leave it.
+- **One-off copies:** that used game with a scuffed case gets its own photos, condition note, and price. The next copy can be completely different. 🎮
+- **Identical stock:** stack copies behind the listing's existing photos. You can set a different price for each one.
+- **Your pace:** go right away, wait between copies, or hold one until you give the nod.
+- **Variations:** choose the exact option to restock; Next changes that option's quantity and price.
+- **Discord pings:** see what sold, what went live, and when a copy needs your approval.
+
+Keys, queue data, and photo originals are stored locally. When you go live, Next sends the listing updates you choose to eBay; Discord alerts go to the webhook you configure.
 
 Works with active fixed-price, Good 'Til Cancelled listings with eBay's Out-of-Stock Control turned on.
 
 <details>
-<summary><b>How a restock works</b></summary>
+<summary><b>What happens after a sale</b></summary>
 
 1. The worker checks your listings every 30 seconds (`NEXTINSTOCK_POLL_SECONDS`).
 2. A sale takes the listing or variation to zero. Out-of-Stock Control keeps it alive.
@@ -66,7 +69,7 @@ Works with active fixed-price, Good 'Til Cancelled listings with eBay's Out-of-S
 5. For a variation, eBay needs price and quantity in one revision, so Next applies both together and confirms them.
 6. The next copy in line moves up.
 
-Each sale gets exactly one handoff. If eBay accepts a change but the confirmation fails, the next check reads eBay first and reconciles before trying again. Changing a price can reset automatic Best Offer thresholds, so check those if you use them.
+Next records each handoff. If eBay accepts a change but the confirmation fails, the next check reads eBay first before retrying. One eBay gotcha: changing a price can reset automatic Best Offer thresholds, so check those if you use them.
 </details>
 
 <details>
@@ -100,23 +103,23 @@ secrets.json         eBay grant and Discord webhook (mode 600)
 Back it up like any other business data.
 </details>
 
-## Updating
+## Come back for updates
 
 ```bash
 git pull && npm ci && npm run build && npm run start:local
 ```
 
-Your `.env.local` and data folder are left alone.
+Your `.env.local` and data folder stay put. If a release changes setup steps, the [guide](https://nextinstock.com/docs) will say so.
 
-## Contributing
+## Help make it better
 
-Issues and pull requests are welcome. Before opening a PR, run:
+Sell cards, records, games, or something we haven't thought of? [Tell us what breaks or feels awkward](https://github.com/beenhad/Nextinstock/issues/new). Small fixes and pull requests are welcome too. Before opening a PR, run:
 
 ```bash
 npm run check && npm test && npm run build
 ```
 
-Never commit `.env.local` or the data folder. The marketing site (`/` and `/docs`) deploys to Vercel, and the hosted build blocks every tool route, so the tool only runs on your own machine.
+Please keep `.env.local`, buyer information, and the data folder out of commits and public issues. The site (`/` and `/docs`) deploys to Vercel; the hosted build blocks tool routes. The actual restock tool runs on your machine.
 
 ## License
 
