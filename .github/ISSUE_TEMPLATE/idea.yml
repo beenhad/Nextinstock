@@ -1,0 +1,25 @@
+name: Idea or rough edge
+description: Tell us what would make Next work better for your shop.
+title: "[Idea] "
+body:
+  - type: markdown
+    attributes:
+      value: "Seller workflows are the point. Tell us what you are trying to move, without sharing buyer information or private shop data."
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What are you trying to do?
+      description: A little context about the inventory or listing helps.
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: What would make it easier?
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What do you do today?
+      description: Optional, but useful for understanding the gap.

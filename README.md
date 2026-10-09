@@ -121,6 +121,8 @@ npm run check && npm test && npm run build
 
 Please keep `.env.local`, buyer information, and the data folder out of commits and public issues. The site (`/` and `/docs`) deploys to Vercel; the hosted build blocks tool routes. The actual restock tool runs on your machine.
 
+There is a short [contribution guide](CONTRIBUTING.md) for reports and pull requests. If you find a security problem, use the [private reporting instructions](SECURITY.md).
+
 ## License
 
 [MIT](LICENSE). Independent software for eBay sellers, not affiliated with eBay.
