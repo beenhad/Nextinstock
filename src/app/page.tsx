@@ -29,10 +29,6 @@ const softwareSchema = {
 
 const faqs = [
   {
-    question: "Is it really free?",
-    answer: "Yes. Next is open source under the MIT license. Clone it, run it, change it. There is no account, subscription, or paid tier.",
-  },
-  {
     question: "Does Next make a new listing when something sells?",
     answer: "No. It restocks the listing you already have, so the item number and sold count stay put. It works with fixed-price, Good \u2019Til Cancelled listings that have Out-of-Stock Control turned on.",
   },
@@ -47,10 +43,6 @@ const faqs = [
   {
     question: "Where does it run, and what do I need?",
     answer: "On your own computer, so it needs to stay on while it watches your listings. You need Node.js 22 or newer and your own eBay developer keys. The setup guide walks through both.",
-  },
-  {
-    question: "Can I contribute?",
-    answer: "Please do. Open an issue for bugs or ideas, or send a pull request. The README covers how the code is laid out.",
   },
 ];
 
