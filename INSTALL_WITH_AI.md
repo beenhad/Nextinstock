@@ -1,4 +1,4 @@
-# Install Nextinstock with Codex or Claude
+# Install Nextinstock with an AI assistant
 
 Give your AI assistant this file and your clone of the Nextinstock repository. You can use this prompt:
 
