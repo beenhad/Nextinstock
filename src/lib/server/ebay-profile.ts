@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
 import type { EbayProfile } from "@/lib/types";
 import { ebayCredentials } from "./config";
-import { callTradingApi } from "./ebay";
+import { callTradingApi, credentialIdentity } from "./ebay";
 
 const PROFILE_CACHE_MS = 10 * 60_000;
 let cachedProfile: { key: string; expiresAt: number; value: EbayProfile } | null = null;
-let pendingProfile: Promise<EbayProfile> | null = null;
+let pendingProfile: { key: string; promise: Promise<EbayProfile> } | null = null;
 
 export function parseEbayUserId(xml: string): string | null {
   const user = xml.match(/<User(?:\s[^>]*)?>([\s\S]*?)<\/User>/)?.[1];
@@ -86,12 +85,13 @@ async function loadEbayProfile(): Promise<EbayProfile> {
 export async function fetchEbayProfile(): Promise<EbayProfile> {
   const refreshToken = ebayCredentials().refreshToken;
   if (!refreshToken) throw new Error("eBay is not connected");
-  const key = createHash("sha256").update(refreshToken).digest("hex");
+  const key = credentialIdentity();
   if (cachedProfile?.key === key && cachedProfile.expiresAt > Date.now()) return cachedProfile.value;
-  if (pendingProfile) return pendingProfile;
-  pendingProfile = loadEbayProfile().then((value) => {
-    cachedProfile = { key, expiresAt: Date.now() + PROFILE_CACHE_MS, value };
+  if (pendingProfile?.key === key) return pendingProfile.promise;
+  const promise = loadEbayProfile().then((value) => {
+    if (key === credentialIdentity()) cachedProfile = { key, expiresAt: Date.now() + PROFILE_CACHE_MS, value };
     return value;
-  }).finally(() => { pendingProfile = null; });
-  return pendingProfile;
+  }).finally(() => { if (pendingProfile?.promise === promise) pendingProfile = null; });
+  pendingProfile = { key, promise };
+  return promise;
 }

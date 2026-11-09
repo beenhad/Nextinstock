@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after } from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { ListingSnapshot, RestockTask } from "@/lib/types";
 import { appliedCopyMatches, buildRestockPlan, effectiveCopyContent, restockWindowDue, stageAndPublishCopy } from "./restock-worker";
+
+const directory = mkdtempSync(path.join(os.tmpdir(), "nextinstock-plan-"));
+process.env.NEXTINSTOCK_DATA_DIR = directory;
+process.env.SELLERMAID_ENV_FILE = "";
+after(() => rmSync(directory, { recursive: true, force: true }));
 
 const listing = {
   quantityAvailable: 1,

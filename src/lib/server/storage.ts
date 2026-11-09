@@ -136,3 +136,10 @@ export function storeTaskImages(
 export function readStoredImage(storageKey: string): Buffer {
   return imageStorageDriver().readImage(storageKey);
 }
+
+export function removeStoredImages(images: StoredImage[]): void {
+  for (const image of images) {
+    try { unlinkSync(absoluteStoragePath(image.storageKey)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.error("Could not remove an uncommitted photo"); }
+  }
+}

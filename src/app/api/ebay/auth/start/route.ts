@@ -4,7 +4,7 @@ import { ebayConsentUrl } from "@/lib/server/ebay";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const state = crypto.randomUUID();
     const response = NextResponse.redirect(ebayConsentUrl(state));
@@ -13,7 +13,7 @@ export async function GET() {
       value: state,
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: new URL(request.url).protocol === "https:",
       path: "/",
       maxAge: 10 * 60,
     });

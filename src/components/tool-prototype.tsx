@@ -154,36 +154,63 @@ export function ToolPrototype() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [profile, setProfile] = useState<EbayProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [busyTaskIds, setBusyTaskIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
+  const [refreshError, setRefreshError] = useState("");
 
-  const reload = useCallback(async () => {
-    const [tasksResponse, eventsResponse, statusResponse] = await Promise.all([
-      fetch("/api/tasks", { cache: "no-store" }),
-      fetch("/api/activity", { cache: "no-store" }),
-      fetch("/api/system/status", { cache: "no-store" }),
-    ]);
-    const [tasksPayload, eventsPayload, statusPayload] = await Promise.all([
-      tasksResponse.json() as Promise<{ tasks?: RestockTask[]; error?: string }>,
-      eventsResponse.json() as Promise<{ events?: ActivityEvent[]; error?: string }>,
-      statusResponse.json() as Promise<{ status?: SystemStatus; error?: string }>,
-    ]);
-    if (!tasksResponse.ok) throw new Error(tasksPayload.error || "Could not load tasks");
-    const fresh = tasksPayload.tasks ?? [];
-    const current = tasksRef.current;
-    // Never clobber an add that is still on its way to the server.
-    if (!current.some((task) => task.queuedCopies.some((copy) => copy.id.startsWith("pending-")))
-        && JSON.stringify(fresh) !== JSON.stringify(current)) {
-      if (current.length) withTransition(() => setTasks(fresh), "data"); else setTasks(fresh);
+  const tasksRef = useRef(tasks);
+  const pendingOperations = useRef(new Map<string, number>());
+  const operationQueues = useRef(new Map<string, Promise<unknown>>());
+  const intakeRequests = useRef(new Map<string, { id: string; startIndex: number }>());
+  const reloadController = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  const commitTasks = useCallback((update: (current: RestockTask[]) => RestockTask[]) => {
+    tasksRef.current = update(tasksRef.current);
+    if (mounted.current) setTasks(tasksRef.current);
+  }, []);
+
+  const reload = useCallback(async (refreshTaskId?: string) => {
+    reloadController.current?.abort();
+    const controller = new AbortController();
+    reloadController.current = controller;
+    try {
+      const responses = await Promise.all([
+        fetch("/api/tasks", { cache: "no-store", signal: controller.signal }),
+        fetch("/api/activity", { cache: "no-store", signal: controller.signal }),
+        fetch("/api/system/status", { cache: "no-store", signal: controller.signal }),
+      ]);
+      const [tasksPayload, eventsPayload, statusPayload] = await Promise.all(responses.map((response) => response.json())) as [
+        { tasks?: RestockTask[]; error?: string }, { events?: ActivityEvent[]; error?: string }, { status?: SystemStatus; error?: string },
+      ];
+      for (const [index, payload] of [tasksPayload, eventsPayload, statusPayload].entries()) {
+        if (!responses[index].ok) throw new Error(payload.error || "Could not refresh Nextinstock");
+      }
+      if (controller.signal.aborted || !mounted.current) return;
+      const current = tasksRef.current;
+      const protectedTask = (id: string) => id !== refreshTaskId && pendingOperations.current.has(id);
+      const fresh = (tasksPayload.tasks ?? []).map((task) => protectedTask(task.id) ? current.find((entry) => entry.id === task.id) ?? task : task);
+      fresh.push(...current.filter((task) => protectedTask(task.id) && !fresh.some((entry) => entry.id === task.id)));
+      if (JSON.stringify(fresh) !== JSON.stringify(current)) commitTasks(() => fresh);
+      setEvents(eventsPayload.events ?? []);
+      setStatus(statusPayload.status ?? null);
+      setRefreshError("");
+    } catch (caught) {
+      if (!controller.signal.aborted) {
+        if (mounted.current) setRefreshError(caught instanceof Error ? caught.message : "Could not refresh Nextinstock");
+        throw caught;
+      }
     }
-    setEvents(eventsPayload.events ?? []);
-    setStatus(statusPayload.status ?? null);
+  }, [commitTasks]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; reloadController.current?.abort(); };
   }, []);
 
   useEffect(() => {
     reload()
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load Nextinstock"))
+      .catch(() => undefined)
       .finally(() => setLoading(false));
     // The Discord "Approve" link opens the listing so the seller can confirm with one tap.
     const approveId = new URLSearchParams(window.location.search).get("approve");
@@ -206,181 +233,227 @@ export function ToolPrototype() {
       setProfile(null);
       return;
     }
+    setProfile(null);
     let cancelled = false;
-    fetch("/api/ebay/profile", { cache: "no-store" })
+    const controller = new AbortController();
+    fetch("/api/ebay/profile", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("Could not load eBay profile");
         return response.json() as Promise<{ profile: EbayProfile }>;
       })
       .then((payload) => { if (!cancelled) setProfile(payload.profile); })
       .catch(() => { if (!cancelled) setProfile(null); });
-    return () => { cancelled = true; };
-  }, [status?.ebayConfigured, status?.ebayCredentialSource]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [status?.ebayConfigured, status?.ebayCredentialSource, status?.ebayAccountKey]);
 
   const toastTimer = useRef<number | undefined>(undefined);
-  const tasksRef = useRef(tasks);
-  tasksRef.current = tasks;
-  const queueSequence = useRef(new Map<string, number>());
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   function showToast(message: string) {
+    if (!mounted.current) return;
     window.clearTimeout(toastTimer.current);
     setToast(message);
     toastTimer.current = window.setTimeout(() => setToast(""), 3200);
   }
 
+  function serializeTask<T>(taskId: string, job: () => Promise<T>): Promise<T> {
+    pendingOperations.current.set(taskId, (pendingOperations.current.get(taskId) ?? 0) + 1);
+    setBusyTaskIds(new Set(pendingOperations.current.keys()));
+    const previous = operationQueues.current.get(taskId) ?? Promise.resolve();
+    const result = previous.catch(() => undefined).then(job).finally(() => {
+      const left = (pendingOperations.current.get(taskId) ?? 1) - 1;
+      if (left) pendingOperations.current.set(taskId, left);
+      else { pendingOperations.current.delete(taskId); operationQueues.current.delete(taskId); }
+      if (mounted.current) setBusyTaskIds(new Set(pendingOperations.current.keys()));
+    });
+    operationQueues.current.set(taskId, result.catch(() => undefined));
+    return result;
+  }
+
+  function replaceTask(task: RestockTask) {
+    commitTasks((list) => list.map((entry) => entry.id === task.id ? task : entry));
+  }
+
   async function checkTask(taskId: string) {
-    setBusyTaskId(taskId);
-    setError("");
-    try {
-      const response = await fetch(`/api/tasks/${taskId}/check`, { method: "POST" });
-      const payload = (await response.json()) as { result?: WorkerResult; error?: string };
-      if (!response.ok || !payload.result) throw new Error(payload.error || "Task check failed");
-      await reload();
-      showToast(payload.result.message);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Task check failed");
-    } finally {
-      setBusyTaskId(null);
-    }
+    return serializeTask(taskId, async () => {
+      setError("");
+      try {
+        const response = await fetch(`/api/tasks/${taskId}/check`, { method: "POST" });
+        const payload = await response.json() as { result?: WorkerResult; error?: string };
+        if (!response.ok || !payload.result) throw new Error(payload.error || "Task check failed");
+        await reload(taskId);
+        showToast(payload.result.message);
+      } catch (caught) { setError(caught instanceof Error ? caught.message : "Task check failed"); }
+    });
   }
 
-  async function updateQueue(taskId: string, copyId: string, body: QueueAction): Promise<boolean> {
-    const current = tasksRef.current.find((task) => task.id === taskId);
-    if (!current) return false;
-    const sequence = (queueSequence.current.get(taskId) ?? 0) + 1;
-    queueSequence.current.set(taskId, sequence);
-    const nextTask = applyQueueAction(current, copyId, body);
-    const commit = () => setTasks((list) => list.map((task) => task.id === taskId ? nextTask : task));
-    if (body.action === "move" || body.action === "remove") withTransition(commit, "data");
-    else commit();
-    setError("");
-    try {
-      const url = `/api/tasks/${taskId}/copies/${copyId}`;
-      const response = body.action === "remove"
-        ? await fetch(url, { method: "DELETE" })
-        : await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const payload = await response.json() as { task?: RestockTask; error?: string };
-      if (!response.ok || !payload.task) throw new Error(payload.error || "Could not update the queue");
-      if (queueSequence.current.get(taskId) === sequence) {
-        setTasks((list) => list.map((task) => task.id === taskId ? payload.task! : task));
+  function updateQueue(taskId: string, copyId: string, body: QueueAction): Promise<boolean> {
+    return serializeTask(taskId, async () => {
+      const current = tasksRef.current.find((task) => task.id === taskId);
+      if (!current) return false;
+      const commit = () => { if (tasksRef.current.find((task) => task.id === taskId) === current) replaceTask(applyQueueAction(current, copyId, body)); };
+      if (body.action === "move" || body.action === "remove") withTransition(commit, "data"); else commit();
+      setError("");
+      try {
+        const url = `/api/tasks/${taskId}/copies/${copyId}`;
+        const response = body.action === "remove" ? await fetch(url, { method: "DELETE" })
+          : await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const payload = await response.json() as { task?: RestockTask; error?: string };
+        if (!response.ok || !payload.task) throw new Error(payload.error || "Could not update the queue");
+        replaceTask(payload.task);
+        if (body.action === "remove") showToast("Copy removed from the queue");
+        return true;
+      } catch (caught) {
+        replaceTask(current);
+        setError(caught instanceof Error ? caught.message : "Could not update the queue");
+        await reload(taskId).catch(() => undefined);
+        return false;
       }
-      if (body.action === "remove") showToast("Copy removed from the queue");
-      return true;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update the queue");
-      await reload().catch(() => undefined);
-      return false;
-    }
+    });
   }
 
-  async function patchTask(taskId: string, patch: TaskPatch): Promise<boolean> {
-    const current = tasksRef.current.find((task) => task.id === taskId);
-    if (!current) return false;
-    const sequence = (queueSequence.current.get(taskId) ?? 0) + 1;
-    queueSequence.current.set(taskId, sequence);
-    const nextTask = applyTaskPatch(current, patch);
-    const commit = () => setTasks((list) => list.map((task) => task.id === taskId ? nextTask : task));
-    if (patch.order && !patch.fromDrag) withTransition(commit, "data"); else commit();
-    setError("");
-    try {
-      const response = await fetch(`/api/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...patch, fromDrag: undefined }) });
-      const payload = await response.json() as { task?: RestockTask; error?: string };
-      if (!response.ok || !payload.task) throw new Error(payload.error || "Could not save the change");
-      if (queueSequence.current.get(taskId) === sequence) {
-        setTasks((list) => list.map((task) => task.id === taskId ? payload.task! : task));
+  function patchTask(taskId: string, patch: TaskPatch): Promise<boolean> {
+    return serializeTask(taskId, async () => {
+      const current = tasksRef.current.find((task) => task.id === taskId);
+      if (!current) return false;
+      const commit = () => { if (tasksRef.current.find((task) => task.id === taskId) === current) replaceTask(applyTaskPatch(current, patch)); };
+      if (patch.order && !patch.fromDrag) withTransition(commit, "data"); else commit();
+      setError("");
+      try {
+        const response = await fetch(`/api/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...patch, fromDrag: undefined }) });
+        const payload = await response.json() as { task?: RestockTask; error?: string };
+        if (!response.ok || !payload.task) throw new Error(payload.error || "Could not save the change");
+        replaceTask(payload.task);
+        if (patch.prices) showToast(`Repriced ${patch.prices.length} queued ${patch.prices.length === 1 ? "copy" : "copies"}`);
+        return true;
+      } catch (caught) {
+        replaceTask(current);
+        setError(caught instanceof Error ? caught.message : "Could not save the change");
+        await reload(taskId).catch(() => undefined);
+        return false;
       }
-      if (patch.prices) showToast(`Repriced ${patch.prices.length} queued ${patch.prices.length === 1 ? "copy" : "copies"}`);
-      return true;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save the change");
-      await reload().catch(() => undefined);
-      return false;
-    }
+    });
   }
 
-  async function addIdentical(taskId: string, copies: IdenticalCopies): Promise<RestockTask | null> {
-    setError("");
-    const current = tasksRef.current.find((task) => task.id === taskId);
-    if (!current) return null;
-    // Show the new copies immediately; the server's answer replaces these placeholders.
-    const stamp = Date.now();
-    const placeholders: QueuedCopy[] = Array.from({ length: copies.count }, (_, index) => ({
-      id: `pending-${stamp}-${index}`, taskId, queuePosition: 0, internalReference: `${copies.reference}…`,
-      targetPrice: copies.prices[index] ?? null, conditionId: null, conditionName: null, conditionDescription: "",
-      releaseDelaySeconds: copies.releaseDelaySeconds ?? null, needsApproval: Boolean(copies.needsApproval), grade: null,
-      status: "queued", photos: [], createdAt: new Date().toISOString(),
-    }));
-    const anchorIndex = copies.afterCopyId ? current.queuedCopies.findIndex((copy) => copy.id === copies.afterCopyId) : -1;
-    const at = anchorIndex >= 0 ? anchorIndex + 1 : current.queuedCopies.length;
-    const optimistic = [...current.queuedCopies.slice(0, at), ...placeholders, ...current.queuedCopies.slice(at)];
-    setTasks((list) => list.map((task) => task.id === taskId ? { ...task, queuedCopies: optimistic, queuedCopy: optimistic[0] ?? null } : task));
-    const sequence = (queueSequence.current.get(taskId) ?? 0) + 1;
-    queueSequence.current.set(taskId, sequence);
-    try {
-      const form = new FormData();
-      form.set("internalReference", copies.reference);
-      form.set("count", String(copies.count));
-      form.set("startIndex", String(current.queuedCopies.filter((copy) => copy.photos.length === 0).length + 1));
-      form.set("prices", JSON.stringify(copies.prices.map((price) => price === null ? null : price.toFixed(2))));
-      if (copies.releaseDelaySeconds !== undefined && copies.releaseDelaySeconds !== null) form.set("releaseDelaySeconds", String(copies.releaseDelaySeconds));
-      if (copies.needsApproval) form.set("needsApproval", "true");
-      const response = await fetch(`/api/tasks/${taskId}/copies`, { method: "POST", body: form });
-      const payload = await response.json() as { task?: RestockTask; error?: string };
-      if (!response.ok || !payload.task) throw new Error(payload.error || "Could not add copies");
-      let task = payload.task;
-      if (at < current.queuedCopies.length) {
-        const known = new Set(current.queuedCopies.map((copy) => copy.id));
-        const added = task.queuedCopies.filter((copy) => !known.has(copy.id)).map((copy) => copy.id);
-        const rest = task.queuedCopies.map((copy) => copy.id).filter((id) => !added.includes(id));
-        const order = [...rest.slice(0, at), ...added, ...rest.slice(at)];
-        const reordered = await fetch(`/api/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order }) });
-        const reorderPayload = await reordered.json() as { task?: RestockTask };
-        if (reordered.ok && reorderPayload.task) task = reorderPayload.task;
+  function intakeRequest(taskId: string, kind: string, details: unknown) {
+    const key = JSON.stringify([taskId, kind, details]);
+    let receipt = intakeRequests.current.get(key);
+    if (!receipt) {
+      receipt = { id: crypto.randomUUID(), startIndex: (tasksRef.current.find((task) => task.id === taskId)?.queuedCopies.filter((copy) => !copy.photos.length).length ?? 0) + 1 };
+      intakeRequests.current.set(key, receipt);
+    }
+    return { key, ...receipt };
+  }
+
+  function addIdentical(taskId: string, copies: IdenticalCopies): Promise<RestockTask | null> {
+    const receipt = intakeRequest(taskId, "identical", copies);
+    return serializeTask(taskId, async () => {
+      setError("");
+      const current = tasksRef.current.find((task) => task.id === taskId);
+      if (!current) return null;
+      const placeholders: QueuedCopy[] = Array.from({ length: copies.count }, (_, index) => ({
+        id: `pending-${receipt.id}-${index}`, taskId, queuePosition: 0, internalReference: `${copies.reference}…`,
+        targetPrice: copies.prices[index] ?? null, conditionId: null, conditionName: null, conditionDescription: "",
+        releaseDelaySeconds: copies.releaseDelaySeconds ?? null, needsApproval: Boolean(copies.needsApproval), grade: null,
+        status: "queued", photos: [], createdAt: new Date().toISOString(),
+      }));
+      const anchorIndex = copies.afterCopyId ? current.queuedCopies.findIndex((copy) => copy.id === copies.afterCopyId) : -1;
+      const at = anchorIndex >= 0 ? anchorIndex + 1 : current.queuedCopies.length;
+      const optimistic = [...current.queuedCopies.slice(0, at), ...placeholders, ...current.queuedCopies.slice(at)];
+      replaceTask({ ...current, queuedCopies: optimistic, queuedCopy: optimistic[0] ?? null });
+      try {
+        const form = new FormData();
+        form.set("requestId", receipt.id);
+        form.set("itemId", current.itemId);
+        form.set("variationKey", current.variationKey ?? "");
+        form.set("internalReference", copies.reference);
+        form.set("count", String(copies.count));
+        form.set("startIndex", String(receipt.startIndex));
+        form.set("prices", JSON.stringify(copies.prices.map((price) => price === null ? null : price.toFixed(2))));
+        if (copies.afterCopyId) form.set("afterCopyId", copies.afterCopyId);
+        if (copies.releaseDelaySeconds !== undefined && copies.releaseDelaySeconds !== null) form.set("releaseDelaySeconds", String(copies.releaseDelaySeconds));
+        if (copies.needsApproval) form.set("needsApproval", "true");
+        const response = await fetch(`/api/tasks/${taskId}/copies`, { method: "POST", body: form });
+        const payload = await response.json() as { task?: RestockTask; error?: string };
+        if (!response.ok || !payload.task) throw new Error(payload.error || "Could not add copies");
+        replaceTask(payload.task);
+        intakeRequests.current.delete(receipt.key);
+        return payload.task;
+      } catch (caught) {
+        replaceTask(current);
+        setError(caught instanceof Error ? caught.message : "Could not add copies");
+        await reload(taskId).catch(() => undefined);
+        return null;
       }
-      if (queueSequence.current.get(taskId) === sequence) setTasks((list) => list.map((entry) => entry.id === taskId ? task : entry));
-      return task;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not add copies");
-      await reload().catch(() => undefined);
-      return null;
-    }
+    });
   }
 
-  async function addDistinct(taskId: string, copy: DistinctCopy): Promise<RestockTask | null> {
-    setError("");
-    try {
-      const form = new FormData();
-      form.set("internalReference", copy.reference);
-      form.set("conditionDescription", copy.note);
-      form.set("targetPrice", copy.price.trim());
-      if (copy.grade) form.set("grade", copy.grade);
-      copy.files.forEach((file) => form.append("photos", file));
-      const response = await fetch(`/api/tasks/${taskId}/copies`, { method: "POST", body: form });
-      const payload = await response.json() as { task?: RestockTask; error?: string };
-      if (!response.ok || !payload.task) throw new Error(payload.error || "Could not add the copy");
-      flushSync(() => setTasks((list) => list.map((task) => task.id === taskId ? payload.task! : task)));
-      showToast("Added to the line");
-      return payload.task;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not add the copy");
-      return null;
-    }
+  function addDistinct(taskId: string, copy: DistinctCopy): Promise<RestockTask | null> {
+    const receipt = intakeRequest(taskId, "distinct", { ...copy, files: copy.files.map((file) => [file.name, file.size, file.type, file.lastModified]) });
+    return serializeTask(taskId, async () => {
+      setError("");
+      const current = tasksRef.current.find((task) => task.id === taskId);
+      if (!current) return null;
+      try {
+        const form = new FormData();
+        form.set("requestId", receipt.id);
+        form.set("itemId", current.itemId);
+        form.set("variationKey", current.variationKey ?? "");
+        form.set("internalReference", copy.reference);
+        form.set("conditionDescription", copy.note);
+        form.set("targetPrice", copy.price.trim());
+        if (copy.grade) form.set("grade", copy.grade);
+        if (copy.releaseDelaySeconds !== undefined && copy.releaseDelaySeconds !== null) form.set("releaseDelaySeconds", String(copy.releaseDelaySeconds));
+        if (copy.needsApproval) form.set("needsApproval", "true");
+        copy.files.forEach((file) => form.append("photos", file));
+        const response = await fetch(`/api/tasks/${taskId}/copies`, { method: "POST", body: form });
+        const payload = await response.json() as { task?: RestockTask; error?: string };
+        if (!response.ok || !payload.task) throw new Error(payload.error || "Could not add the copy");
+        flushSync(() => replaceTask(payload.task!));
+        intakeRequests.current.delete(receipt.key);
+        showToast("Added to the line");
+        return payload.task;
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not add the copy");
+        await reload(taskId).catch(() => undefined);
+        return null;
+      }
+    });
   }
 
-  async function approve(taskId: string): Promise<boolean> {
-    setError("");
-    try {
-      const response = await fetch(`/api/tasks/${taskId}/approve`, { method: "POST" });
-      const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error || "Could not approve");
-      await reload();
-      showToast("Approved. The next one is going up.");
-      if (window.location.search.includes("approve=")) window.history.replaceState(null, "", "/tool");
-      return true;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not approve");
-      return false;
-    }
+  function approve(taskId: string): Promise<boolean> {
+    return serializeTask(taskId, async () => {
+      setError("");
+      try {
+        const response = await fetch(`/api/tasks/${taskId}/approve`, { method: "POST" });
+        const payload = await response.json() as { error?: string; result?: WorkerResult; task?: RestockTask };
+        if (!response.ok || payload.error) throw new Error(payload.error || "Could not approve");
+        if (payload.task) replaceTask(payload.task);
+        await reload(taskId);
+        showToast(payload.result?.message ?? "Approved. Waiting for the next check.");
+        if (window.location.search.includes("approve=")) window.history.replaceState(null, "", "/tool");
+        return true;
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not approve");
+        await reload(taskId).catch(() => undefined);
+        return false;
+      }
+    });
+  }
+
+  function taskAction(taskId: string, action: "pause" | "resume" | "sold" | "retry", copyId?: string): Promise<boolean> {
+    const runId = tasksRef.current.find((task) => task.id === taskId)?.pendingHandoff?.id;
+    return serializeTask(taskId, async () => {
+      setError("");
+      try {
+        const response = await fetch(`/api/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, runId, copyId, reviewed: action === "sold" || action === "retry" }) });
+        const payload = await response.json() as { task?: RestockTask; error?: string };
+        if (!response.ok || !payload.task) throw new Error(payload.error || "Could not update the task");
+        replaceTask(payload.task);
+        showToast(action === "pause" ? "Paused" : action === "resume" ? "Resumed" : "Review saved");
+        return true;
+      } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not update the task"); return false; }
+    });
   }
 
   function openTask(taskId: string | null) {
@@ -437,7 +510,7 @@ export function ToolPrototype() {
           <span>
             <strong>{profile?.userId ?? (status?.ebayConfigured ? "eBay account" : "Not connected")}</strong>
             <small>
-              {status?.ebayConfigured ? <><Check size={11} /> eBay connected</> : "Connect in Settings"}
+              {profile ? <><Check size={11} /> eBay connected</> : status?.ebayConfigured ? "Credentials saved" : "Connect in Settings"}
             </small>
           </span>
         </div>
@@ -455,7 +528,7 @@ export function ToolPrototype() {
         </header>
 
         <main className="tool-workspace">
-          {error && <div className="tool-error-banner"><AlertTriangle size={17} /> {error}</div>}
+          {(error || refreshError) && <div className="tool-error-banner"><AlertTriangle size={17} /> {error || refreshError}</div>}
           {builderStep > 0 ? (
             <TaskBuilder
               key={prefillItemId || "new"}
@@ -468,11 +541,12 @@ export function ToolPrototype() {
             <ReleaseLine
               key={openTaskData.id}
               task={openTaskData}
-              busy={busyTaskId === openTaskData.id}
+              busy={busyTaskIds.has(openTaskData.id)}
               actions={{
                 onBack: () => openTask(null),
                 onCheck: () => void checkTask(openTaskData.id),
                 onApprove: () => approve(openTaskData.id),
+                onTaskAction: (action, copyId) => taskAction(openTaskData.id, action, copyId),
                 onQueueAction: (copyId, body) => updateQueue(openTaskData.id, copyId, body),
                 onPatch: (patch) => patchTask(openTaskData.id, patch),
                 onAddIdentical: (copies) => addIdentical(openTaskData.id, copies),
@@ -514,19 +588,32 @@ function TaskBuilder({
   const [submitting, setSubmitting] = useState(false);
   const [builderError, setBuilderError] = useState("");
 
+  const lookupController = useRef<AbortController | null>(null);
+  const alive = useRef(true);
+  const submittingRef = useRef(false);
+  const submission = useRef<{ key: string; id: string } | null>(null);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; lookupController.current?.abort(); };
+  }, []);
+
   const syncListing = useCallback(async () => {
+    lookupController.current?.abort();
+    const controller = new AbortController();
+    lookupController.current = controller;
     setLoadingListing(true);
     setBuilderError("");
     try {
-      const response = await fetch(`/api/ebay/listings?itemId=${encodeURIComponent(itemId)}`, { cache: "no-store" });
-      const payload = (await response.json()) as { listing?: ListingSnapshot; error?: string };
-      if (!response.ok || !payload.listing) throw new Error(payload.error || "Couldn't find that listing");
+      const response = await fetch(`/api/ebay/listings?itemId=${encodeURIComponent(itemId)}`, { cache: "no-store", signal: controller.signal });
+      const payload = await response.json() as { listing?: ListingSnapshot; error?: string };
+      if (controller.signal.aborted || !alive.current) return;
+      if (!response.ok || !payload.listing || payload.listing.itemId !== itemId) throw new Error(payload.error || "Couldn't find that listing");
       setListing(payload.listing);
       setVariationKey(null);
     } catch (caught) {
-      setBuilderError(caught instanceof Error ? caught.message : "Couldn't find that listing");
+      if (!controller.signal.aborted && alive.current) setBuilderError(caught instanceof Error ? caught.message : "Couldn't find that listing");
     } finally {
-      setLoadingListing(false);
+      if (!controller.signal.aborted && alive.current) setLoadingListing(false);
     }
   }, [itemId]);
 
@@ -535,8 +622,9 @@ function TaskBuilder({
   }, []); // Look the prefilled listing up once when this opens.
 
   async function start() {
+    if (submittingRef.current) return;
     setBuilderError("");
-    if (!listing || !listing.supported) {
+    if (!listing || listing.itemId !== itemId || !listing.supported) {
       setBuilderError(listing?.unsupportedReasons.join(". ") || "Look up a listing first");
       return;
     }
@@ -544,20 +632,25 @@ function TaskBuilder({
       setBuilderError("Choose which option this is for");
       return;
     }
+    const key = JSON.stringify([listing.itemId, variationKey]);
+    if (submission.current?.key !== key) submission.current = { key, id: crypto.randomUUID() };
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const form = new FormData();
+      form.set("requestId", submission.current.id);
       form.set("itemId", listing.itemId);
       form.set("startEmpty", "true");
       if (variationKey) form.set("variationKey", variationKey);
       const response = await fetch("/api/tasks", { method: "POST", body: form });
-      const payload = (await response.json()) as { task?: RestockTask; error?: string };
+      const payload = await response.json() as { task?: RestockTask; error?: string };
       if (!response.ok || !payload.task) throw new Error(payload.error || "Couldn't add the listing");
-      await onCreated(payload.task);
+      if (alive.current) await onCreated(payload.task);
     } catch (caught) {
-      setBuilderError(caught instanceof Error ? caught.message : "Couldn't add the listing");
+      if (alive.current) setBuilderError(caught instanceof Error ? caught.message : "Couldn't add the listing");
     } finally {
-      setSubmitting(false);
+      submittingRef.current = false;
+      if (alive.current) setSubmitting(false);
     }
   }
 
@@ -577,7 +670,7 @@ function TaskBuilder({
           itemId={itemId}
           listing={listing}
           loading={loadingListing}
-          onItemId={(value) => { setItemId(value); setListing(null); setVariationKey(null); }}
+          onItemId={(value) => { lookupController.current?.abort(); setLoadingListing(false); setItemId(value); setListing(null); setVariationKey(null); }}
           onSync={syncListing}
           variationKey={variationKey}
           onVariationKey={setVariationKey}
@@ -667,7 +760,7 @@ function VariationPicker({ listing, selectedKey, onSelect }: {
       const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null");
       if (Array.isArray(saved)) {
         const valid = saved.filter((key): key is string => typeof key === "string" && listing.variations.some((variation) => variation.key === key));
-        if (valid.length) setVisibleKeys(valid);
+        setVisibleKeys(valid);
       }
     } catch { /* Ignore invalid local display preferences. */ }
   }, [storageKey, listing.variations]);
@@ -683,7 +776,7 @@ function VariationPicker({ listing, selectedKey, onSelect }: {
       ? visibleKeys.filter((current) => current !== key)
       : [...visibleKeys, key];
     setVisibleKeys(next);
-    localStorage.setItem(storageKey, JSON.stringify(next));
+    try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Keep the local view usable if storage is unavailable. */ }
   }
 
   return (
@@ -785,8 +878,8 @@ function SettingsView({ status, onSaved }: { status: SystemStatus | null; onSave
         <div>
           <EbayBadge />
           <span>
-            <strong>{status?.ebayConfigured ? "eBay connected" : "eBay not connected"}</strong>
-            <small>{status?.ebayConfigured ? (status.liveWritesAuthorized || status.writeMode === "dry-run" ? "Next can read your listings." : "Next can read your listings but isn't allowed to update them yet.") : "Add your eBay developer keys to .env.local, then restart Next."}</small>
+            <strong>{status?.ebayConfigured ? "eBay credentials saved" : "eBay not connected"}</strong>
+            <small>{status?.ebayConfigured ? (status.liveWritesAuthorized || status.writeMode === "dry-run" ? "Credentials are configured. Sync a listing to verify access." : "Credentials are configured; listing updates still need authorization.") : "Add your eBay developer keys to .env.local, then restart Next."}</small>
           </span>
           <a className="settings-action" href="/api/ebay/auth/start">{status?.ebayConfigured ? "Allow listing updates" : "Connect eBay"} <ExternalLink size={13} /></a>
         </div>
@@ -805,7 +898,7 @@ function SettingsView({ status, onSaved }: { status: SystemStatus | null; onSave
         <div>
           <Clock3 size={21} />
           <span><strong>Checking eBay</strong><small>Every {status?.pollSeconds ?? 30} seconds. Default wait before a restock: {Math.round((status?.restockDelaySeconds ?? 60) / 60) >= 1 ? `${Math.round((status?.restockDelaySeconds ?? 60) / 60)} min` : `${status?.restockDelaySeconds}s`}. Each listing can override it.</small></span>
-          <span className="settings-on">On</span>
+          <span className={`settings-on ${status?.worker?.state === "running" && Date.now() - new Date(status.worker.heartbeatAt).getTime() < Math.max(90, status.pollSeconds * 3) * 1000 ? "" : "is-warning"}`}>{status?.worker?.state === "running" && Date.now() - new Date(status.worker.heartbeatAt).getTime() < Math.max(90, status.pollSeconds * 3) * 1000 ? "Running" : "Not running"}</span>
         </div>
         <div>
           <HardDrive size={21} />

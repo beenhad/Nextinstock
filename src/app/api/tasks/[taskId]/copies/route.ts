@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { MAX_QUEUED_COPIES, addQueuedCopy, getTask } from "@/lib/server/database";
+import { MAX_QUEUED_COPIES, addQueuedCopies, getTask, replayCopyRequest, photoStorageKeyInUse } from "@/lib/server/database";
 import { fetchListing } from "@/lib/server/ebay";
-import { storeTaskImages } from "@/lib/server/storage";
+import { storeTaskImages, removeStoredImages, type StoredImage } from "@/lib/server/storage";
+import { copyRequest } from "@/lib/server/copy-request";
 import { parseTargetPrice } from "@/lib/server/price";
 
 export const runtime = "nodejs";
@@ -17,11 +18,21 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ taskId: string }> },
 ) {
+  let images: StoredImage[] = [];
+  let requestIdentity: Awaited<ReturnType<typeof copyRequest>>;
+  let committed = false;
   try {
     const { taskId } = await context.params;
     const current = getTask(taskId);
     if (!current) return NextResponse.json({ error: "Task not found" }, { status: 404 });
     const form = await request.formData();
+    requestIdentity = await copyRequest(form, taskId);
+    const replay = requestIdentity && replayCopyRequest(requestIdentity.id, requestIdentity.fingerprint);
+    if (replay) return NextResponse.json({ task: replay }, { status: 201 });
+    if (String(form.get("itemId") ?? "").trim() !== current.itemId || (String(form.get("variationKey") ?? "").trim() || null) !== current.variationKey) {
+      return NextResponse.json({ error: "Queued copy target does not match this task" }, { status: 409 });
+    }
+    const afterCopyId = String(form.get("afterCopyId") ?? "").trim() || undefined;
     const internalReference = String(form.get("internalReference") ?? "").trim().slice(0, 100);
     const conditionDescription = String(form.get("conditionDescription") ?? "").trim().slice(0, 1000);
     const files = form.getAll("photos").filter((value): value is File => value instanceof File);
@@ -62,26 +73,25 @@ export async function POST(
     if (!current.variationKey && !files.length && !listing.imageUrls.length) {
       return NextResponse.json({ error: "This listing has no photos to reuse. Add photos for this copy." }, { status: 400 });
     }
-    let task = current;
-    for (let index = 0; index < count; index += 1) {
-      const copyId = randomUUID();
-      const images = files.length ? await storeTaskImages(taskId, copyId, files) : [];
-      task = addQueuedCopy({
-        taskId,
-        copyId,
-        snapshot: listing,
-        internalReference: count > 1 || startIndex !== null ? `${internalReference}-${(startIndex ?? 1) + index}`.slice(0, 100) : internalReference,
-        conditionDescription,
-        targetPrice: prices[index],
-        releaseDelaySeconds: releaseDelaySeconds !== null && Number.isFinite(releaseDelaySeconds) ? releaseDelaySeconds : null,
-        needsApproval,
-        grade: String(form.get("grade") ?? "") || null,
-        images,
-      });
-    }
+    const copyIds = Array.from({ length: count }, () => randomUUID());
+    images = files.length ? await storeTaskImages(taskId, copyIds[0], files) : [];
+    const task = addQueuedCopies(copyIds.map((copyId, index) => ({
+      taskId, copyId, snapshot: listing,
+      internalReference: count > 1 || startIndex !== null ? `${internalReference}-${(startIndex ?? 1) + index}`.slice(0, 100) : internalReference,
+      conditionDescription, targetPrice: prices[index],
+      releaseDelaySeconds: releaseDelaySeconds !== null && Number.isFinite(releaseDelaySeconds) ? releaseDelaySeconds : null,
+      needsApproval, grade: String(form.get("grade") ?? "") || null,
+      afterCopyId: afterCopyId ? index === 0 ? afterCopyId : copyIds[index - 1] : undefined,
+      images: index === 0 ? images : [],
+    })), requestIdentity);
+    committed = true;
     return NextResponse.json({ task }, { status: 201 });
   } catch (error) {
+    if (!committed) {
+      try { removeStoredImages(images.filter((image) => !photoStorageKeyInUse(image.storageKey))); } catch { console.error("Could not clean uncommitted photos; preserved for review"); }
+      if (requestIdentity) { try { const replay = replayCopyRequest(requestIdentity.id, requestIdentity.fingerprint); if (replay) return NextResponse.json({ task: replay }, { status: 201 }); } catch { /* Return conflict below. */ } }
+    }
     const message = error instanceof Error ? error.message : "Could not queue the copy";
-    return NextResponse.json({ error: message }, { status: /price|JSON/i.test(message) ? 400 : 500 });
+    return NextResponse.json({ error: message }, { status: /locked|changed|wait for|already saved|UNIQUE/i.test(message) ? 409 : /price|JSON|Invalid copy request|Each photo|at most|between|pixels|readable image/i.test(message) ? 400 : 500 });
   }
 }

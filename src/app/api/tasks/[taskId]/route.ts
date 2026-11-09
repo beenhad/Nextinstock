@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { reorderQueuedCopies, setQueuedCopyPrices, updateTaskSettings } from "@/lib/server/database";
+import { updateTask, setTaskPaused } from "@/lib/server/database";
+import { resolveHandoff } from "@/lib/server/restock-worker";
 import { parseTargetPrice } from "@/lib/server/price";
-import type { PriceRule, RestockTask } from "@/lib/types";
+import type { PriceRule } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,23 +15,25 @@ export async function PATCH(request: Request, context: { params: Promise<{ taskI
   try {
     const { taskId } = await context.params;
     const body = await request.json() as {
+      action?: string; runId?: string; copyId?: string; reviewed?: boolean;
       restockDelaySeconds?: number | null;
       priceRule?: PriceRule | null;
       order?: string[];
       prices?: Array<{ copyId: string; targetPrice: string | number | null }>;
     };
-    let task: RestockTask | null = null;
-    if (body.restockDelaySeconds !== undefined || body.priceRule !== undefined) {
-      task = updateTaskSettings(taskId, { restockDelaySeconds: body.restockDelaySeconds, priceRule: body.priceRule });
+    if (body.action) {
+      const task = body.action === "pause" || body.action === "resume" ? setTaskPaused(taskId, body.action === "pause")
+        : (body.action === "sold" || body.action === "retry") && typeof body.runId === "string"
+          ? await resolveHandoff(taskId, body.runId, body.action, body.reviewed === true, body.copyId) : null;
+      return task ? NextResponse.json({ task }) : NextResponse.json({ error: "Invalid task action" }, { status: 400 });
     }
-    if (Array.isArray(body.order)) task = reorderQueuedCopies(taskId, body.order.map(String));
-    if (Array.isArray(body.prices)) {
-      task = setQueuedCopyPrices(taskId, body.prices.map((entry) => ({
-        copyId: String(entry.copyId),
-        targetPrice: parseTargetPrice(entry.targetPrice === null ? null : String(entry.targetPrice)),
-      })));
-    }
-    if (!task) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+    const task = updateTask(taskId, {
+      restockDelaySeconds: body.restockDelaySeconds, priceRule: body.priceRule,
+      order: Array.isArray(body.order) ? body.order.map(String) : undefined,
+      prices: Array.isArray(body.prices) ? body.prices.map((entry) => ({
+        copyId: String(entry.copyId), targetPrice: parseTargetPrice(entry.targetPrice === null ? null : String(entry.targetPrice)),
+      })) : undefined,
+    });
     return NextResponse.json({ task });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not update the task";

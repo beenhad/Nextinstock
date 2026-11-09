@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { discordWebhookUrl, saveDiscordAlerts, saveDiscordWebhookUrl } from "@/lib/server/config";
 import { buildPreviewDiscordPayload, buildTestDiscordPayload, configureDiscordWebhook, sendDiscordMessage, validateDiscordWebhookUrl } from "@/lib/server/discord";
 import { fetchSellerPreviewListing } from "@/lib/server/ebay";
+import { cancelDiscordNotifications } from "@/lib/server/database";
 import { saleTriggerState } from "@/lib/server/sale-trigger";
 
 export const runtime = "nodejs";
@@ -28,6 +29,9 @@ export async function POST(request: Request) {
     }
     if (body.action === "connect") {
       const url = validateDiscordWebhookUrl(body.webhookUrl ?? "");
+      // Verify the endpoint before replacing a working connection.
+      await sendDiscordMessage(url, buildTestDiscordPayload());
+      if (discordWebhookUrl() !== url) cancelDiscordNotifications();
       saveDiscordWebhookUrl(url);
       try {
         await configureDiscordWebhook(url);
@@ -37,6 +41,7 @@ export async function POST(request: Request) {
       }
     }
     if (body.action === "disconnect") {
+      cancelDiscordNotifications();
       saveDiscordWebhookUrl(null);
       return NextResponse.json({ connected: false });
     }

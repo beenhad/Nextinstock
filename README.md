@@ -126,3 +126,10 @@ There is a short [contribution guide](CONTRIBUTING.md) for reports and pull requ
 ## License
 
 [MIT](LICENSE). Independent software for eBay sellers, not affiliated with eBay.
+
+
+## Handoff recovery and API retries
+
+A scheduled handoff stays tied to one physical copy. **Review publication** blocks further writes until eBay readback or seller review resolves an uncertain publication. Pause stops manual and automatic checks; refilling the line does not resume a paused task.
+
+Copy-intake forms should include a stable UUID `requestId` for identical retries. Append forms must include the task's exact `itemId` and `variationKey` (omit the variation key for a single listing). Batch additions commit together; replaying the request does not add the same stock again.

@@ -28,7 +28,7 @@ test("only one worker owns a task, and an expired lease can be recovered", async
   legacy.prepare("INSERT INTO copies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .run("legacy-copy", "legacy-task", "LEGACY", null, null, "Saved note", "queued", "2025-01-01", "2025-01-01");
   legacy.close();
-  const { acquireTaskLease, addQueuedCopy, approveHandoffRun, updateHandoffRun, completeHandoff, createTask, getOrCreateHandoffRun, getTask, moveQueuedCopy, pendingDiscordNotifications, queueDiscordNotification, recordDiscordDelivery, releaseTaskLease, removeQueuedCopy, renewTaskLease, reorderQueuedCopies, scheduleHandoffRun, setQueuedCopyPrices, updateQueuedCopyDetails, updateTaskSettings, updateQueuedCopyPrice, upsertListing } = await import("./database");
+  const { acquireTaskLease, addQueuedCopy, approveHandoffRun, pinHandoffCopy, updateHandoffRun, completeHandoff, createTask, getOrCreateHandoffRun, getTask, moveQueuedCopy, pendingDiscordNotifications, queueDiscordNotification, recordDiscordDelivery, releaseTaskLease, removeQueuedCopy, renewTaskLease, reorderQueuedCopies, scheduleHandoffRun, setQueuedCopyPrices, updateQueuedCopyDetails, updateTaskSettings, updateQueuedCopyPrice, upsertListing } = await import("./database");
   const snapshot: ListingSnapshot = {
     itemId: "123456789",
     sku: null,
@@ -70,9 +70,7 @@ test("only one worker owns a task, and an expired lease can be recovered", async
     images: [],
   });
   const run = getOrCreateHandoffRun(task.id, 1);
-  assert.equal(scheduleHandoffRun(run.id, "2026-10-02T19:31:00.000Z"), true);
-  assert.equal(scheduleHandoffRun(run.id, "2026-10-02T19:32:00.000Z"), false);
-  assert.equal(getOrCreateHandoffRun(task.id, 1).executeAfter, "2026-10-02T19:31:00.000Z");
+
 
   assert.equal(acquireTaskLease(task.id, "worker-a"), true);
   assert.equal(acquireTaskLease(task.id, "worker-b"), false);
@@ -121,6 +119,12 @@ test("only one worker owns a task, and an expired lease can be recovered", async
   assert.throws(() => updateTaskSettings(task.id, { priceRule: { mode: "percent", step: 500, cap: null } }), /out of range/);
   for (const copy of getTask(task.id)!.queuedCopies.filter((candidate) => candidate.id !== "copy-one" && candidate.id !== "copy-three" && candidate.id !== "copy-two")) removeQueuedCopy(task.id, copy.id);
   reorderQueuedCopies(task.id, ["copy-one", "copy-three", "copy-two"].filter((id) => getTask(task.id)?.queuedCopies.some((copy) => copy.id === id)));
+  assert.equal(scheduleHandoffRun(run.id, "2026-10-02T19:31:00.000Z"), true);
+  assert.equal(scheduleHandoffRun(run.id, "2026-10-02T19:32:00.000Z"), false);
+  assert.equal(getOrCreateHandoffRun(task.id, 1).executeAfter, "2026-10-02T19:31:00.000Z");
+  updateHandoffRun(run.id, { status: "uploading" });
+  updateHandoffRun(run.id, { status: "revising" });
+  updateHandoffRun(run.id, { status: "publishing" });
   completeHandoff({ taskId: task.id, copyId: "copy-one", runId: run.id, snapshot: { ...snapshot, quantitySold: 1, quantityAvailable: 1 } });
   assert.equal(getTask(task.id)?.queuedCopy?.internalReference, "COPY-3");
   assert.equal(getTask(task.id)?.status, "active");
@@ -164,6 +168,7 @@ test("only one worker owns a task, and an expired lease can be recovered", async
   // Approval releases only a run that is actually waiting.
   const waitingRun = getOrCreateHandoffRun("blank-task", 9);
   assert.equal(approveHandoffRun("blank-task"), false);
+  pinHandoffCopy(waitingRun.id, "blank-1");
   updateHandoffRun(waitingRun.id, { status: "awaiting_approval" });
   assert.equal(approveHandoffRun("blank-task"), true);
   const approved = getOrCreateHandoffRun("blank-task", 9);

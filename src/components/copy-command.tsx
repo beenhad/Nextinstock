@@ -1,14 +1,17 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function CopyCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; window.clearTimeout(timer.current); }; }, []);
   async function copy() {
     try {
       await navigator.clipboard.writeText(command);
+      if (!mounted.current) return;
       setCopied(true);
       window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => setCopied(false), 1600);

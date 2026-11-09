@@ -40,6 +40,7 @@ export type ReleaseLineActions = {
   onBack: () => void;
   onCheck: () => void;
   onApprove: () => Promise<boolean>;
+  onTaskAction?: (action: "pause" | "resume" | "sold" | "retry", copyId?: string) => Promise<boolean>;
   onQueueAction: (copyId: string, body: QueueAction) => Promise<boolean>;
   onPatch: (patch: TaskPatch) => Promise<boolean>;
   onAddIdentical: (copies: IdenticalCopies) => Promise<RestockTask | null>;
@@ -132,7 +133,7 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
     return () => observer.disconnect();
   }, []);
   const size = densityFor(units.length, lineWidth);
-  const locked = task.status === "scheduled" || task.status === "processing";
+  const locked = busy || ["scheduled", "processing", "reconciling", "awaiting_approval"].includes(task.status) || Boolean(task.pendingHandoff && (task.pendingHandoff.copyId || !["created", "blocked", "dry_run"].includes(task.pendingHandoff.status)));
   const full = copies.length >= MAX_COPIES;
   const isVariation = Boolean(task.variationKey);
 
@@ -184,7 +185,7 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
   function dragEnd(event: DragEndEvent) {
     setDragging(null);
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    if (locked || !over || active.id === over.id) return;
     const ids = units.map((unit) => unit.id);
     const from = ids.indexOf(String(active.id));
     const to = ids.indexOf(String(over.id));
@@ -244,13 +245,15 @@ export function ReleaseLine({ task, busy, actions }: { task: RestockTask; busy: 
         </p>
       </div>
       <ListingState task={task} />
-      <button type="button" className="rl-icon" onClick={actions.onCheck} disabled={busy} title="Check eBay now" aria-label="Check eBay now">
+      {actions.onTaskAction && <button type="button" className="rl-quiet" disabled={busy} onClick={() => void actions.onTaskAction?.(task.status === "paused" ? "resume" : "pause")}>{task.status === "paused" ? "Resume" : "Pause"}</button>}
+      <button type="button" className="rl-icon" onClick={actions.onCheck} disabled={busy || task.status === "paused"} title="Check eBay now" aria-label="Check eBay now">
         <RefreshCw size={17} className={busy ? "spin" : ""} />
       </button>
     </header>
 
     {awaiting && copies[0] && <ApproveBar copy={copies[0]} onApprove={actions.onApprove} />}
-    {locked && <p className="rl-locked">A restock is running. You can edit again in a moment.</p>}
+    {task.status === "reconciling" && actions.onTaskAction && <ReviewBar key={task.pendingHandoff?.id} task={task} busy={busy} onResolve={actions.onTaskAction} />}
+    {locked && task.status !== "reconciling" && <p className="rl-locked">{task.status === "awaiting_approval" ? "This copy is reserved while it waits for your approval." : busy ? "Saving the change…" : "A restock is running. You can edit again in a moment."}</p>}
 
     <div className={`rl-canvas is-${size}`} ref={canvasRef}>
       <div className="rl-canvas-head">
@@ -376,6 +379,7 @@ function ListingState({ task }: { task: RestockTask }) {
     active: ["is-ok", task.queuedCopies.length ? "Watching for a sale" : "Nothing lined up"],
     scheduled: ["is-busy", "Restock coming up"],
     processing: ["is-busy", "Restocking now"],
+    reconciling: ["is-wait", "Review publication"],
     awaiting_approval: ["is-wait", "Waiting for your OK"],
     dry_run_ready: ["is-wait", "Test run ready"],
     attention: ["is-wait", "Needs a look"],
@@ -384,6 +388,27 @@ function ListingState({ task }: { task: RestockTask }) {
   };
   const [tone, label] = map[task.status] ?? map.active;
   return <span className={`rl-state ${task.status === "active" && !task.queuedCopies.length ? "is-wait" : tone}`}><i aria-hidden="true" />{label}</span>;
+}
+
+function ReviewBar({ task, busy, onResolve }: {
+  task: RestockTask; busy: boolean;
+  onResolve: NonNullable<ReleaseLineActions["onTaskAction"]>;
+}) {
+  const [reviewed, setReviewed] = useState(false);
+  const [copyId, setCopyId] = useState(task.pendingHandoff?.copyId ?? "");
+  const copy = task.queuedCopies.find((entry) => entry.id === copyId);
+  return <div className="rl-sheet" role="status">
+    <h3>Review this publication</h3>
+    <p>{task.lastError ?? "eBay did not confirm whether this copy went live. Check the listing, orders, and physical copy before continuing."}</p>
+    {!task.pendingHandoff?.copyId && <label>Physical copy <select aria-label="Physical copy to review" value={copyId} onChange={(event) => { setCopyId(event.target.value); setReviewed(false); }}>
+      <option value="">Choose the copy</option>{task.queuedCopies.map((entry) => <option key={entry.id} value={entry.id}>{entry.internalReference}</option>)}
+    </select></label>}
+    <label><input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} /> I checked eBay and the physical copy{copy ? ` (${copy.internalReference})` : ""}.</label>
+    <div className="rl-row">
+      <button type="button" className="rl-quiet" disabled={busy || !reviewed || !copyId} onClick={() => void onResolve("sold", copyId)}>Confirm this copy sold</button>
+      <button type="button" className="rl-quiet" disabled={busy || !reviewed || !copyId} onClick={() => void onResolve("retry", copyId)}>Confirm unpublished and retry</button>
+    </div>
+  </div>;
 }
 
 function ApproveBar({ copy, onApprove }: { copy: QueuedCopy; onApprove: () => Promise<boolean> }) {
@@ -464,14 +489,27 @@ function Chips<T extends string>({ value, options, onChange, disabled }: {
   </div>;
 }
 
+/** A server refresh may update an untouched field, but must preserve an unsaved draft. */
+function useDraft(saved: string) {
+  const [draft, setDraft] = useState(saved);
+  const previous = useRef(saved);
+  useEffect(() => {
+    const baseline = previous.current;
+    previous.current = saved;
+    setDraft((current) => current === baseline ? saved : current);
+  }, [saved]);
+  return [draft, setDraft] as const;
+}
+
 function PriceInput({ value, live, currency, disabled, onCommit, autoFocus = false, size = "lg" }: {
   value: number | null; live: number | null; currency: string; disabled?: boolean;
   onCommit: (price: string) => Promise<boolean> | void; autoFocus?: boolean; size?: "lg" | "sm";
 }) {
   const saved = value === null ? "" : value.toFixed(2);
-  const [draft, setDraft] = useState(saved);
+  const [draft, setDraft] = useDraft(saved);
   const [flash, setFlash] = useState(false);
-  useEffect(() => setDraft(saved), [saved]);
+  const flashTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(flashTimer.current), []);
   async function commit() {
     const trimmed = draft.trim();
     if (trimmed === saved) return;
@@ -480,7 +518,8 @@ function PriceInput({ value, live, currency, disabled, onCommit, autoFocus = fal
     const normalized = trimmed ? number.toFixed(2) : "";
     setDraft(normalized);
     const ok = await onCommit(normalized);
-    if (ok !== false) { setFlash(true); window.setTimeout(() => setFlash(false), 900); }
+    if (ok !== false) { setFlash(true); window.clearTimeout(flashTimer.current); flashTimer.current = window.setTimeout(() => setFlash(false), 900); }
+    else setDraft((current) => current === normalized ? saved : current);
   }
   return <label className={`rl-money is-${size} ${flash ? "is-saved" : ""}`}>
     <span aria-hidden="true">{currency === "USD" ? "$" : currency}</span>
@@ -553,10 +592,8 @@ function CopyIdentityFields({ copy, locked, own, isVariation, onAction }: {
   copy: QueuedCopy; locked: boolean; own: boolean; isVariation: boolean;
   onAction: (body: QueueAction) => Promise<boolean>;
 }) {
-  const [reference, setReference] = useState(copy.internalReference);
-  const [note, setNote] = useState(copy.conditionDescription);
-  useEffect(() => setReference(copy.internalReference), [copy.internalReference]);
-  useEffect(() => setNote(copy.conditionDescription), [copy.conditionDescription]);
+  const [reference, setReference] = useDraft(copy.internalReference);
+  const [note, setNote] = useDraft(copy.conditionDescription);
   return <>
     <div className="rl-row is-top"><span>Your SKU / ref</span>
       <div><input className="rl-input" value={reference} maxLength={100} disabled={locked} aria-label={`SKU or reference for ${copy.internalReference}`}
@@ -564,7 +601,7 @@ function CopyIdentityFields({ copy, locked, own, isVariation, onAction }: {
         onBlur={() => {
           const value = reference.trim();
           if (!value) { setReference(copy.internalReference); return; }
-          if (value !== copy.internalReference) void onAction({ action: "details", internalReference: value }).then((ok) => { if (!ok) setReference(copy.internalReference); });
+          if (value !== copy.internalReference) void onAction({ action: "details", internalReference: value }).then((ok) => { if (!ok) setReference((current) => current.trim() === value ? copy.internalReference : current); });
         }}
         onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
         <p className="rl-help">Saved in Next only. It does not edit the eBay SKU or an order that already sold.</p></div>
@@ -576,7 +613,7 @@ function CopyIdentityFields({ copy, locked, own, isVariation, onAction }: {
         onBlur={() => {
           const value = note.trim();
           if (own && !value) { setNote(copy.conditionDescription); return; }
-          if (value !== copy.conditionDescription) void onAction({ action: "details", conditionDescription: value }).then((ok) => { if (!ok) setNote(copy.conditionDescription); });
+          if (value !== copy.conditionDescription) void onAction({ action: "details", conditionDescription: value }).then((ok) => { if (!ok) setNote((current) => current.trim() === value ? copy.conditionDescription : current); });
         }}
         onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
         <p className="rl-help">{isVariation

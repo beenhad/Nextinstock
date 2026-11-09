@@ -11,9 +11,12 @@ function stop() {
   if (stopping) return;
   stopping = true;
   for (const child of children) child.kill("SIGTERM");
+  const watchdog = setTimeout(() => { for (const child of children) if (child.exitCode === null) child.kill("SIGKILL"); }, 5000);
+  watchdog.unref();
 }
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
+for (const child of children) child.on("error", (error) => { console.error("Could not start Nextinstock process:", error.message); process.exitCode = 1; stop(); });
 for (const child of children) child.on("exit", (code) => {
   if (!stopping && code) process.exitCode = code;
   stop();

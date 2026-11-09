@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
 import type { EbayWriteMode, SystemStatus, DiscordAlerts } from "@/lib/types";
@@ -44,6 +45,13 @@ function readLocalSecrets(): LocalSecrets {
   }
 }
 
+function writeLocalSecrets(payload: LocalSecrets) {
+  const destination = secretsPath();
+  const temporary = `${destination}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(payload, null, 2), { mode: 0o600 });
+  renameSync(temporary, destination);
+}
+
 export function saveLocalEbayGrant(refreshToken: string, scopes: string[]) {
   const payload: LocalSecrets = {
     ...readLocalSecrets(),
@@ -51,8 +59,7 @@ export function saveLocalEbayGrant(refreshToken: string, scopes: string[]) {
     ebayGrantedScopes: scopes,
     updatedAt: new Date().toISOString(),
   };
-  writeFileSync(secretsPath(), JSON.stringify(payload, null, 2), { mode: 0o600 });
-  chmodSync(secretsPath(), 0o600);
+  writeLocalSecrets(payload);
 }
 
 export function discordWebhookUrl(): string | null {
@@ -69,8 +76,7 @@ export function saveDiscordAlerts(alerts: Partial<DiscordAlerts>) {
   const next = { ...discordAlerts(), ...alerts };
   payload.discordAlerts = { sales: Boolean(next.sales), restocks: Boolean(next.restocks), needsYou: Boolean(next.needsYou) };
   payload.updatedAt = new Date().toISOString();
-  writeFileSync(secretsPath(), JSON.stringify(payload, null, 2), { mode: 0o600 });
-  chmodSync(secretsPath(), 0o600);
+  writeLocalSecrets(payload);
 }
 
 export function publicAppUrl(): string {
@@ -82,8 +88,7 @@ export function saveDiscordWebhookUrl(url: string | null) {
   if (url) payload.discordWebhookUrl = url;
   else delete payload.discordWebhookUrl;
   payload.updatedAt = new Date().toISOString();
-  writeFileSync(secretsPath(), JSON.stringify(payload, null, 2), { mode: 0o600 });
-  chmodSync(secretsPath(), 0o600);
+  writeLocalSecrets(payload);
 }
 
 export function ebayCredentials() {
@@ -139,6 +144,7 @@ export function systemStatus(): SystemStatus {
   const requiredWriteScope = "https://api.ebay.com/oauth/api_scope/sell.inventory";
   const hasLocalWriteGrant =
     credentials.source === "nextinstock" && credentials.grantedScopes.includes(requiredWriteScope);
+  const ebayConfigured = Boolean(credentials.appId && credentials.certId && credentials.refreshToken);
   const writeMode = ebayWriteMode();
   const persistentStorage = !process.env.VERCEL;
   let liveWritesBlocker: string | null = null;
@@ -146,12 +152,15 @@ export function systemStatus(): SystemStatus {
     liveWritesBlocker = "Write mode is dry-run.";
   } else if (!persistentStorage) {
     liveWritesBlocker = "Live restocking needs persistent storage and a hosted worker.";
+  } else if (!ebayConfigured) {
+    liveWritesBlocker = "eBay application credentials are incomplete.";
   } else if (!hasLocalWriteGrant) {
     liveWritesBlocker = "Reconnect eBay in Nextinstock with sell.inventory permission.";
   }
 
   return {
-    ebayConfigured: Boolean(credentials.appId && credentials.certId && credentials.refreshToken),
+    ebayConfigured,
+    ebayAccountKey: createHash("sha256").update(`${credentials.appId}:${credentials.refreshToken}`).digest("hex"),
     ebayCredentialSource: credentials.source,
     writeMode,
     storageDriver: "local",
@@ -160,7 +169,7 @@ export function systemStatus(): SystemStatus {
     pollSeconds: pollSeconds(),
     restockDelaySeconds: restockDelaySeconds(),
     defaultItemId: defaultItemId(),
-    liveWritesAuthorized: writeMode === "live" && persistentStorage && hasLocalWriteGrant,
+    liveWritesAuthorized: liveWritesBlocker === null,
     liveWritesBlocker,
     discordConnected: Boolean(discordWebhookUrl()),
     discordAlerts: discordAlerts(),

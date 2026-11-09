@@ -23,8 +23,8 @@ interface AccessTokenResponse {
 }
 
 let cachedAccessToken: { token: string; expiresAt: number; refreshToken: string } | null = null;
-let inflightRefresh: Promise<string> | null = null;
-let cachedOutOfStockControl: { value: boolean | null; expiresAt: number } | null = null;
+let inflightRefresh: { key: string; promise: Promise<string> } | null = null;
+let cachedOutOfStockControl: { key: string; value: boolean | null; expiresAt: number } | null = null;
 
 function decodeXml(value: string | null): string | null {
   if (value === null) return null;
@@ -128,12 +128,12 @@ async function parseFailure(response: Response): Promise<Error> {
   return new Error(`eBay request failed: ${response.status} ${text.slice(0, 1500)}`);
 }
 
-async function freshAccessToken(): Promise<string> {
-  const credentials = credentialsOrThrow();
+async function freshAccessToken(credentials = credentialsOrThrow()): Promise<string> {
   const basic = Buffer.from(`${credentials.appId}:${credentials.certId}`).toString("base64");
   const response = await fetch(EBAY_TOKEN_URL, {
     method: "POST",
     cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
     headers: {
       Authorization: `Basic ${basic}`,
       "Content-Type": "application/x-www-form-urlencoded",
@@ -146,29 +146,35 @@ async function freshAccessToken(): Promise<string> {
   if (!response.ok) throw await parseFailure(response);
   const payload = (await response.json()) as AccessTokenResponse;
   if (!payload.access_token) throw new Error("eBay token refresh returned no access token");
-  cachedAccessToken = {
+  if (credentialIdentity(credentials) === credentialIdentity()) cachedAccessToken = {
     token: payload.access_token,
-    refreshToken: credentials.refreshToken,
+    refreshToken: credentialIdentity(credentials),
     expiresAt:
       Date.now() + Math.max((payload.expires_in ?? 7200) * 1000, ACCESS_TOKEN_SKEW_MS),
   };
   return payload.access_token;
 }
 
+export function credentialIdentity(credentials = ebayCredentials()): string {
+  return createHash("sha256").update(JSON.stringify([credentials.appId, credentials.certId, credentials.refreshToken])).digest("hex");
+}
+
 export async function accessToken(): Promise<string> {
   const credentials = credentialsOrThrow();
   if (
     cachedAccessToken &&
-    cachedAccessToken.refreshToken === credentials.refreshToken &&
+    cachedAccessToken.refreshToken === credentialIdentity(credentials) &&
     cachedAccessToken.expiresAt > Date.now() + ACCESS_TOKEN_SKEW_MS
   ) {
     return cachedAccessToken.token;
   }
-  if (inflightRefresh) return inflightRefresh;
-  inflightRefresh = freshAccessToken().finally(() => {
-    inflightRefresh = null;
+  const key = credentialIdentity(credentials);
+  if (inflightRefresh?.key === key) return inflightRefresh.promise;
+  const promise = freshAccessToken(credentials).finally(() => {
+    if (inflightRefresh?.promise === promise) inflightRefresh = null;
   });
-  return inflightRefresh;
+  inflightRefresh = { key, promise };
+  return promise;
 }
 
 export async function callTradingApi(callName: string, xml: string): Promise<string> {
@@ -176,6 +182,7 @@ export async function callTradingApi(callName: string, xml: string): Promise<str
   const response = await fetch(EBAY_TRADING_API_URL, {
     method: "POST",
     cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "text/xml",
@@ -198,7 +205,8 @@ export async function callTradingApi(callName: string, xml: string): Promise<str
 }
 
 async function outOfStockControlPreference(): Promise<boolean | null> {
-  if (cachedOutOfStockControl && cachedOutOfStockControl.expiresAt > Date.now()) {
+  const key = credentialIdentity();
+  if (cachedOutOfStockControl?.key === key && cachedOutOfStockControl.expiresAt > Date.now()) {
     return cachedOutOfStockControl.value;
   }
   try {
@@ -211,10 +219,10 @@ async function outOfStockControlPreference(): Promise<boolean | null> {
 </GetUserPreferencesRequest>`,
     );
     const value = tagValue(xml, "OutOfStockControlPreference") === "true";
-    cachedOutOfStockControl = { value, expiresAt: Date.now() + 10 * 60_000 };
+    if (key === credentialIdentity()) cachedOutOfStockControl = { key, value, expiresAt: Date.now() + 10 * 60_000 };
     return value;
   } catch {
-    cachedOutOfStockControl = { value: null, expiresAt: Date.now() + 60_000 };
+    if (key === credentialIdentity()) cachedOutOfStockControl = { key, value: null, expiresAt: Date.now() + 60_000 };
     return null;
   }
 }
@@ -361,6 +369,7 @@ export async function uploadImageToEbay(input: {
   const response = await fetch(EBAY_MEDIA_IMAGE_URL, {
     method: "POST",
     cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
@@ -489,6 +498,7 @@ export async function exchangeAuthorizationCode(code: string): Promise<AccessTok
   const response = await fetch(EBAY_TOKEN_URL, {
     method: "POST",
     cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
     headers: {
       Authorization: `Basic ${basic}`,
       "Content-Type": "application/x-www-form-urlencoded",

@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { createTask, listTasks } from "@/lib/server/database";
+import { createTask, listTasks, replayCopyRequest, photoStorageKeyInUse } from "@/lib/server/database";
 import { fetchListing } from "@/lib/server/ebay";
-import { storeTaskImages } from "@/lib/server/storage";
+import { storeTaskImages, removeStoredImages, type StoredImage } from "@/lib/server/storage";
+import { copyRequest } from "@/lib/server/copy-request";
 import { parseTargetPrice } from "@/lib/server/price";
 
 export const runtime = "nodejs";
@@ -16,8 +17,14 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  let images: StoredImage[] = [];
+  let committed = false;
+  let requestIdentity: Awaited<ReturnType<typeof copyRequest>>;
   try {
     const form = await request.formData();
+    requestIdentity = await copyRequest(form);
+    const replay = requestIdentity && replayCopyRequest(requestIdentity.id, requestIdentity.fingerprint);
+    if (replay) return NextResponse.json({ task: replay }, { status: 201 });
     const itemId = String(form.get("itemId") ?? "").trim();
     const variationKey = String(form.get("variationKey") ?? "").trim() || null;
     const internalReference = String(form.get("internalReference") ?? "").trim().slice(0, 100);
@@ -43,7 +50,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "This listing has no variations" }, { status: 400 });
     }
     if (startEmpty) {
-      const task = createTask({ taskId: randomUUID(), copyId: null, snapshot: listing, variationKey, internalReference: "", conditionDescription: "", images: [] });
+      const task = createTask({ taskId: randomUUID(), copyId: null, snapshot: listing, variationKey, internalReference: "", conditionDescription: "", images: [], request: requestIdentity });
+      committed = true;
       return NextResponse.json({ task }, { status: 201 });
     }
     if (!variationKey && files.length && !conditionDescription) {
@@ -54,7 +62,7 @@ export async function POST(request: Request) {
     }
     const taskId = randomUUID();
     const copyId = randomUUID();
-    const images = files.length ? await storeTaskImages(taskId, copyId, files) : [];
+    images = files.length ? await storeTaskImages(taskId, copyId, files) : [];
     const task = createTask({
       taskId,
       copyId,
@@ -64,11 +72,22 @@ export async function POST(request: Request) {
       conditionDescription,
       targetPrice,
       images,
+      request: requestIdentity,
     });
+    committed = true;
     return NextResponse.json({ task }, { status: 201 });
   } catch (error) {
+    if (!committed) {
+      try { removeStoredImages(images.filter((image) => !photoStorageKeyInUse(image.storageKey))); }
+      catch { console.error("Could not clean uncommitted photos; preserved files for review"); }
+      // Concurrent replay can lose the receipt insert race after writing files.
+      if (requestIdentity) {
+        try { const replay = replayCopyRequest(requestIdentity.id, requestIdentity.fingerprint); if (replay) return NextResponse.json({ task: replay }, { status: 201 }); }
+        catch { /* Return the original conflict below. */ }
+      }
+    }
     const message = error instanceof Error ? error.message : "Could not create the restock task";
     const conflict = message.includes("already exists");
-    return NextResponse.json({ error: message }, { status: conflict ? 409 : message.includes("price") ? 400 : 500 });
+    return NextResponse.json({ error: message }, { status: conflict ? 409 : /locked|restock check|already saved|UNIQUE/.test(message) ? 409 : /price|Invalid copy request|Each photo|at most|between|not a supported image|pixels|readable image|valid eBay item/.test(message) ? 400 : 500 });
   }
 }

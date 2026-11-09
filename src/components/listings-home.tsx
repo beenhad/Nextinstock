@@ -11,6 +11,8 @@ function money(value: number | null | undefined, currency = "USD") {
 }
 
 function stateOf(task: RestockTask): { tone: string; label: string } {
+  if (task.status === "paused") return { tone: "is-wait", label: "Paused" };
+  if (task.status === "reconciling") return { tone: "is-wait", label: "Review publication" };
   if (task.status === "awaiting_approval") return { tone: "is-wait", label: "Waiting for your OK" };
   if (task.status === "scheduled") return { tone: "is-busy", label: "Restock coming up" };
   if (task.status === "processing") return { tone: "is-busy", label: "Restocking now" };

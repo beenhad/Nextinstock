@@ -18,19 +18,23 @@ export async function GET(request: Request) {
     .map((entry) => entry.trim().split("="))
     .find(([name]) => name === "nextinstock_ebay_oauth_state")?.[1];
 
+  const redirect = (outcome: string) => {
+    const response = NextResponse.redirect(new URL(`/tool?ebay=${outcome}`, request.url));
+    response.cookies.delete("nextinstock_ebay_oauth_state");
+    return response;
+  };
+
   if (!code || !returnedState || !expectedState || returnedState !== expectedState) {
-    return NextResponse.redirect(new URL("/tool?ebay=oauth-invalid", request.url));
+    return redirect("oauth-invalid");
   }
 
   try {
     const tokens = await exchangeAuthorizationCode(code);
     if (!tokens.refresh_token) throw new Error("eBay returned no refresh token");
     saveLocalEbayGrant(tokens.refresh_token, EBAY_OAUTH_SCOPES);
-    const response = NextResponse.redirect(new URL("/tool?ebay=connected", request.url));
-    response.cookies.delete("nextinstock_ebay_oauth_state");
-    return response;
+    return redirect("connected");
   } catch (error) {
     console.error("Nextinstock eBay OAuth callback failed", error);
-    return NextResponse.redirect(new URL("/tool?ebay=oauth-error", request.url));
+    return redirect("oauth-error");
   }
 }

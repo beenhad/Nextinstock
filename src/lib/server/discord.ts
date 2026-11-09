@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { discordAlerts, discordWebhookUrl, publicAppUrl, restockDelaySeconds } from "./config";
-import { pendingDiscordNotifications, queueDiscordNotification, recordDiscordDelivery } from "./database";
+import { claimDiscordNotifications, queueDiscordNotification, recordDiscordDelivery } from "./database";
 import type { ListingSnapshot, RestockPlan, WorkerResult } from "@/lib/types";
 
 type DiscordEmbed = {
@@ -275,19 +275,21 @@ export function queueWorkerDiscordUpdate(result: WorkerResult) {
     ? ":" + createHash("sha256").update(result.message).digest("hex").slice(0, 12)
     : "";
   const key = result.taskId + ":" + sold + ":" + result.action + (result.scheduledFor ? ":" + result.scheduledFor : "") + reason;
-  queueDiscordNotification(key, payload);
+  queueDiscordNotification(key, payload, createHash("sha256").update(discordWebhookUrl()!).digest("hex"));
 }
 
 export async function flushDiscordNotifications() {
   const url = discordWebhookUrl();
   if (!url) return;
-  for (const notification of pendingDiscordNotifications()) {
+  const owner = randomUUID();
+  const destination = createHash("sha256").update(url).digest("hex");
+  for (const notification of claimDiscordNotifications(owner, destination)) {
+    if (discordWebhookUrl() !== url) { recordDiscordDelivery(notification.eventKey, "Webhook changed", owner); continue; }
     try {
       await sendDiscordMessage(url, notification.payload);
-      recordDiscordDelivery(notification.eventKey, null);
+      recordDiscordDelivery(notification.eventKey, null, owner);
     } catch (error) {
-      recordDiscordDelivery(notification.eventKey, error instanceof Error ? error.message : "Delivery failed");
-      break;
+      recordDiscordDelivery(notification.eventKey, error instanceof Error ? error.message : "Delivery failed", owner);
     }
   }
 }

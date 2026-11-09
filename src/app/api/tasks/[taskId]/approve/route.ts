@@ -9,7 +9,11 @@ export const dynamic = "force-dynamic";
 export async function POST(_request: Request, context: { params: Promise<{ taskId: string }> }) {
   const { taskId } = await context.params;
   if (!getTask(taskId)) return NextResponse.json({ error: "Listing not found" }, { status: 404 });
-  if (!approveHandoffRun(taskId)) return NextResponse.json({ error: "Nothing is waiting for your OK on this listing" }, { status: 409 });
+  try {
+    if (!approveHandoffRun(taskId)) return NextResponse.json({ error: "Nothing is waiting for your OK on this listing" }, { status: 409 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not approve" }, { status: 409 });
+  }
   try {
     const result = await processTask(taskId);
     return NextResponse.json({ approved: true, result, task: getTask(taskId) });

@@ -42,14 +42,17 @@ export function RepeatStockShowcase() {
   const autoAdvance = useRef(true);
 
   useEffect(() => {
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const reduced = preference.matches;
+    const changed = () => { if (preference.matches) { autoAdvance.current = false; setPlaying(false); } };
+    preference.addEventListener("change", changed);
     autoAdvance.current = !reduced;
-    if (reduced) return;
+    if (reduced) return () => preference.removeEventListener("change", changed);
     const node = rootRef.current;
-    if (!node) return;
+    if (!node) return () => preference.removeEventListener("change", changed);
     const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.35 });
     observer.observe(node);
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); preference.removeEventListener("change", changed); };
   }, []);
 
   useEffect(() => { setPlaying(inView); }, [inView]);
@@ -57,8 +60,10 @@ export function RepeatStockShowcase() {
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (playing) void video.play().catch(() => undefined);
+    let cancelled = false;
+    if (playing) void video.play().catch(() => { if (!cancelled) setPlaying(false); });
     else video.pause();
+    return () => { cancelled = true; video.pause(); };
   }, [activeIndex, playing]);
 
   function select(index: number, fromUser: boolean) {

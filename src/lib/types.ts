@@ -3,6 +3,7 @@ export type TaskStatus =
   | "active"
   | "paused"
   | "processing"
+  | "reconciling"
   | "scheduled"
   | "dry_run_ready"
   | "awaiting_approval"
@@ -62,6 +63,7 @@ export interface TaskPhoto {
   url: string;
   ebayImageId: string | null;
   ebayImageUrl: string | null;
+  ebayImageExpiresAt?: string | null;
 }
 
 export interface QueuedCopy {
@@ -111,6 +113,7 @@ export interface RestockTask {
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
+  pendingHandoff?: { id: string; copyId: string | null; status: string; triggerQuantitySold: number } | null;
 }
 
 export interface ActivityEvent {
@@ -125,6 +128,7 @@ export interface ActivityEvent {
 
 export interface SystemStatus {
   ebayConfigured: boolean;
+  ebayAccountKey?: string;
   ebayCredentialSource: "nextinstock" | "environment" | "missing";
   writeMode: EbayWriteMode;
   storageDriver: "local";
@@ -136,6 +140,7 @@ export interface SystemStatus {
   liveWritesAuthorized: boolean;
   liveWritesBlocker: string | null;
   discordConnected: boolean;
+  worker?: { state: string; heartbeatAt: string } | null;
   discordAlerts: DiscordAlerts;
   publicUrl: string;
 }
